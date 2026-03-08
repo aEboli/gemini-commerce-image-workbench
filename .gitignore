@@ -1,0 +1,17 @@
+.next
+node_modules
+data
+dist
+.runtime
+*.log
+coverage
+output
+release
+tmp
+*.sqlite
+*.db
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+Thumbs.db

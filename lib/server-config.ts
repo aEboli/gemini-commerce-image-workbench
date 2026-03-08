@@ -1,0 +1,22 @@
+import path from "node:path";
+
+import { APP_NAME } from "@/lib/constants";
+import type { AppSettings } from "@/lib/types";
+
+export { APP_NAME };
+
+export const DEFAULT_DATA_DIR = path.join(process.cwd(), "data");
+export const DEFAULT_STORAGE_DIR = path.join(DEFAULT_DATA_DIR, "assets");
+export const DEFAULT_DATABASE_PATH = path.join(DEFAULT_DATA_DIR, "commerce-image-studio.sqlite");
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  defaultApiKey: "",
+  defaultTextModel: "gemini-2.5-flash",
+  defaultImageModel: "gemini-2.5-flash-image",
+  defaultApiBaseUrl: "",
+  defaultApiVersion: "v1beta",
+  defaultApiHeaders: "",
+  storageDir: DEFAULT_STORAGE_DIR,
+  maxConcurrency: 2,
+  defaultUiLanguage: "zh",
+};
