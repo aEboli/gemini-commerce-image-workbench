@@ -1,7 +1,0 @@
-@echo off
-cd /d "%~dp0"
-call "C:\Program Files\nodejs\npm.cmd" run build
-if errorlevel 1 goto end
-powershell -ExecutionPolicy Bypass -File ".\scripts\build-installer.ps1" -SkipBuild -SanitizeSecrets
-:end
-pause
