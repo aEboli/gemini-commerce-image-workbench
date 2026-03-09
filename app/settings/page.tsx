@@ -1,11 +1,13 @@
+import { BrandLibraryManager } from "@/components/brand-library-manager";
 import { SettingsForm } from "@/components/settings-form";
-import { getSettings } from "@/lib/db";
+import { getSettings, listBrands } from "@/lib/db";
 import { t } from "@/lib/i18n";
 import { getUiLanguage } from "@/lib/ui-language";
 
 export default async function SettingsPage() {
   const language = await getUiLanguage();
   const settings = getSettings();
+  const brands = listBrands();
 
   return (
     <div className="stack gap-24">
@@ -14,11 +16,15 @@ export default async function SettingsPage() {
         <h2>{t(language, "settingsTitle")}</h2>
         <p>
           {language === "zh"
-            ? "这里既支持 Google 官方 Gemini，也支持 Gemini 兼容中转站。官方接口时 Base URL 留空；使用中转站时填写对方给你的 base_url。"
-            : "This page supports both Google official Gemini and Gemini-compatible relay services. Leave Base URL empty for Google, or paste the provider's base_url here for a relay."}
+            ? "这里同时支持 Google 官方 Gemini 接口和 Gemini 兼容中转站。使用官方接口时，Base URL 留空即可；使用中转站时，填写对方提供的 base_url。"
+            : "This page supports both the official Google Gemini API and Gemini-compatible relay services. Leave Base URL empty for Google, or paste the relay provider's base_url here."}
         </p>
       </section>
-      <SettingsForm initialSettings={settings} language={language} />
+
+      <section className="settings-layout">
+        <SettingsForm initialSettings={settings} language={language} />
+        <BrandLibraryManager initialBrands={brands} language={language} />
+      </section>
     </div>
   );
 }

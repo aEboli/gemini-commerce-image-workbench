@@ -1,13 +1,18 @@
-﻿param(
+param(
   [string]$OutputRoot = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot '..')) 'release'),
   [switch]$SkipBuild,
-  [switch]$SanitizeSecrets
+  [switch]$SanitizeSecrets,
+  [string]$ReleaseTag = ""
 )
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $packageScript = Join-Path $projectRoot 'scripts\package-release.ps1'
 $releaseDir = Join-Path $OutputRoot 'commerce-image-studio'
-$setupBaseName = if ($SanitizeSecrets) { 'commerce-image-studio-safe-setup' } else { 'commerce-image-studio-setup' }
+$normalizedTag = $ReleaseTag.Trim()
+$slugTag = if ($normalizedTag) { '-' + (($normalizedTag -replace '\s+', '-') -replace '[^A-Za-z0-9\-]', '').ToLowerInvariant() } else { '' }
+$displayTag = if ($normalizedTag) { ' ' + $normalizedTag.ToUpperInvariant() } else { '' }
+$appDirSuffix = if ($normalizedTag) { ($normalizedTag -replace '\s+', '') -replace '[^A-Za-z0-9]', '' } else { '' }
+$setupBaseName = if ($SanitizeSecrets) { "commerce-image-studio${slugTag}-safe-setup" } else { "commerce-image-studio${slugTag}-setup" }
 $setupPath = Join-Path $OutputRoot ($setupBaseName + '.exe')
 $tmpDir = Join-Path $projectRoot 'tmp\inno'
 $issPath = Join-Path $tmpDir 'commerce-image-studio.iss'
@@ -23,6 +28,10 @@ if (-not $isccPath) {
 
 $packageJson = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
 $appVersion = $packageJson.version
+$appName = "Commerce Image Studio$displayTag"
+$publisherName = $appName
+$defaultDirName = if ($appDirSuffix) { "{localappdata}\CommerceImageStudio$appDirSuffix" } else { '{localappdata}\CommerceImageStudio' }
+$appId = if ($appDirSuffix) { "CommerceImageStudio$appDirSuffix" } else { 'CommerceImageStudio' }
 $languagesDir = Join-Path (Split-Path $isccPath -Parent) 'Languages'
 $languageLines = @(
   '[Languages]',
@@ -42,9 +51,36 @@ if (-not (Test-Path $releaseDir)) {
   throw "Release directory was not created: $releaseDir"
 }
 
-Copy-Item -LiteralPath (Join-Path $releaseDir '启动网站.bat') -Destination (Join-Path $releaseDir 'start-app.bat') -Force
-Copy-Item -LiteralPath (Join-Path $releaseDir '安装到本机.bat') -Destination (Join-Path $releaseDir 'install-local.cmd') -Force
-Copy-Item -LiteralPath (Join-Path $releaseDir '查看局域网地址.bat') -Destination (Join-Path $releaseDir 'show-lan-ip.bat') -Force
+@(
+  '@echo off',
+  'setlocal',
+  'cd /d "%~dp0"',
+  'if exist "server.js" (',
+  '  ".\runtime\node.exe" server.js',
+  ') else (',
+  '  echo server.js not found.',
+  '  pause',
+  ')',
+  'endlocal'
+) | Set-Content -LiteralPath (Join-Path $releaseDir 'start-app.bat') -Encoding ASCII
+
+@(
+  '@echo off',
+  'setlocal',
+  'cd /d "%~dp0"',
+  'echo This package is already portable.',
+  'echo Run start-app.bat to launch the app from this folder.',
+  'pause',
+  'endlocal'
+) | Set-Content -LiteralPath (Join-Path $releaseDir 'install-local.cmd') -Encoding ASCII
+
+@(
+  '@echo off',
+  'setlocal',
+  'ipconfig',
+  'pause',
+  'endlocal'
+) | Set-Content -LiteralPath (Join-Path $releaseDir 'show-lan-ip.bat') -Encoding ASCII
 
 if (Test-Path $tmpDir) {
   Remove-Item -Path $tmpDir -Recurse -Force
@@ -57,21 +93,27 @@ function Escape-InnoString([string]$value) {
 
 $sourceDirEscaped = Escape-InnoString $releaseDir
 $outputDirEscaped = Escape-InnoString $OutputRoot
+$defaultDirEscaped = Escape-InnoString $defaultDirName
+$appNameEscaped = Escape-InnoString $appName
+$publisherEscaped = Escape-InnoString $publisherName
+$appIdEscaped = Escape-InnoString $appId
 $iss = @"
-#define MyAppName "Commerce Image Studio"
+#define MyAppName "$appNameEscaped"
 #define MyAppVersion "$appVersion"
-#define MyAppPublisher "Commerce Image Studio"
+#define MyAppPublisher "$publisherEscaped"
 #define MyAppExeName "start-app.bat"
 #define MySourceDir "$sourceDirEscaped"
 #define MyOutputDir "$outputDirEscaped"
 #define MyOutputBaseFilename "$setupBaseName"
+#define MyDefaultDirName "$defaultDirEscaped"
+#define MyAppId "$appIdEscaped"
 
 [Setup]
-AppId={{0A6D1A78-6B54-45C8-8FD0-0F61A7AF0A41}
+AppId={#MyAppId}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={localappdata}\CommerceImageStudio
+DefaultDirName={#MyDefaultDirName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -93,10 +135,10 @@ Uninstallable=no
 $($languageLines -join "`r`n")
 
 [Files]
-Source: "{#MySourceDir}\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Run]
-Filename: "{app}\\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 "@
 Set-Content -LiteralPath $issPath -Value $iss -Encoding UTF8
 

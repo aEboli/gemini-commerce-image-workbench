@@ -6,7 +6,7 @@ export default async function CreatePage() {
   const language = await getUiLanguage();
   return (
     <div className="stack gap-24">
-      <section className="panel">
+      <section className="panel page-intro create-page-intro">
         <p className="eyebrow">{t(language, "navCreate")}</p>
         <h2>{t(language, "createTitle")}</h2>
         <p>{t(language, "createSubtitle")}</p>

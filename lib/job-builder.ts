@@ -1,5 +1,5 @@
-﻿import type { CreateJobInput } from "@/lib/db";
-import type { AssetRecord, JobDetails, JobItemRecord, UiLanguage } from "@/lib/types";
+import type { CreateJobInput } from "@/lib/db";
+import type { AssetRecord, JobDetails, JobItemRecord, ProviderOverride, UiLanguage } from "@/lib/types";
 import { createId, dimensionsForVariant, nowIso } from "@/lib/utils";
 
 export interface CreatePayload {
@@ -19,6 +19,8 @@ export interface CreatePayload {
   variantsPerType: number;
   includeCopyLayout: boolean;
   uiLanguage: UiLanguage;
+  selectedTemplateOverrides?: Record<string, string>;
+  temporaryProvider?: ProviderOverride;
 }
 
 export function buildJobItems(sourceAssets: AssetRecord[], payload: CreatePayload, jobId: string): JobItemRecord[] {
@@ -48,6 +50,7 @@ export function buildJobItems(sourceAssets: AssetRecord[], payload: CreatePayloa
               copyJson: null,
               generatedAssetId: null,
               layoutAssetId: null,
+              reviewStatus: "unreviewed",
               createdAt: now,
               updatedAt: now,
               errorMessage: null,
@@ -83,6 +86,7 @@ export function buildCreateJobInput(sourceAssets: AssetRecord[], payload: Create
     batchFileCount: sourceAssets.length,
     sourceDescription: payload.sourceDescription,
     uiLanguage: payload.uiLanguage,
+    selectedTemplateOverrides: payload.selectedTemplateOverrides ?? {},
     sourceAssets: sourceAssets.map((asset) => ({ ...asset, jobId })),
     items,
   };
@@ -116,6 +120,7 @@ export function buildRetryJobInput(details: JobDetails): CreateJobInput {
       variantsPerType: details.job.variantsPerType,
       includeCopyLayout: details.job.includeCopyLayout,
       uiLanguage: details.job.uiLanguage,
+      selectedTemplateOverrides: details.job.selectedTemplateOverrides,
     },
   );
 }

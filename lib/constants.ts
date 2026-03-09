@@ -27,6 +27,23 @@ export const OUTPUT_LANGUAGES: SelectOption[] = [
   { value: "pt-BR", label: { zh: "葡萄牙语（巴西）", en: "Portuguese (Brazil)" } },
 ];
 
+export const DEFAULT_LANGUAGE_BY_COUNTRY: Record<string, string> = {
+  CN: "zh-CN",
+  US: "en-US",
+  GB: "en-GB",
+  DE: "de-DE",
+  FR: "fr-FR",
+  JP: "ja-JP",
+  KR: "ko-KR",
+  CA: "en-US",
+  AU: "en-GB",
+  SG: "en-GB",
+};
+
+export function getDefaultLanguageForCountry(country: string): string | null {
+  return DEFAULT_LANGUAGE_BY_COUNTRY[country] ?? null;
+}
+
 export const PLATFORMS: SelectOption[] = [
   { value: "amazon", label: { zh: "Amazon", en: "Amazon" } },
   { value: "tiktok-shop", label: { zh: "TikTok Shop", en: "TikTok Shop" } },

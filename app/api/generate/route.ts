@@ -4,11 +4,12 @@ import { createJob } from "@/lib/db";
 import { buildCreateJobInput, type CreatePayload } from "@/lib/job-builder";
 import { enqueueJob } from "@/lib/queue";
 import { writeFileAsset } from "@/lib/storage";
+import type { ProviderOverride } from "@/lib/types";
 import { createId } from "@/lib/utils";
 
 export const runtime = "nodejs";
 
-function isPayload(value: unknown): value is CreatePayload & { temporaryApiKey?: string } {
+function isPayload(value: unknown): value is CreatePayload {
   if (!value || typeof value !== "object") {
     return false;
   }
@@ -55,7 +56,15 @@ export async function POST(request: Request) {
 
   const createInput = buildCreateJobInput(sourceAssets, payload, jobId);
   const job = createJob(createInput);
-  enqueueJob(job.id, payload.temporaryApiKey);
+  const temporaryProvider: ProviderOverride | undefined =
+    payload.temporaryProvider &&
+    (payload.temporaryProvider.apiKey ||
+      payload.temporaryProvider.apiBaseUrl ||
+      payload.temporaryProvider.apiVersion ||
+      payload.temporaryProvider.apiHeaders)
+      ? payload.temporaryProvider
+      : undefined;
+  enqueueJob(job.id, temporaryProvider);
 
   return NextResponse.json({ jobId: job.id });
 }

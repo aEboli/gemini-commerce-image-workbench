@@ -1,12 +1,13 @@
-﻿import { getSettings } from "@/lib/db";
+import { getSettings } from "@/lib/db";
 import { processJob } from "@/lib/generation";
+import type { ProviderOverride } from "@/lib/types";
 
 declare global {
   var commerceStudioQueue:
     | {
         active: number;
         pending: string[];
-        secrets: Map<string, string | undefined>;
+        overrides: Map<string, ProviderOverride | undefined>;
       }
     | undefined;
 }
@@ -16,7 +17,7 @@ function getQueue() {
     globalThis.commerceStudioQueue = {
       active: 0,
       pending: [],
-      secrets: new Map(),
+      overrides: new Map(),
     };
   }
 
@@ -34,23 +35,23 @@ async function pumpQueue() {
     }
 
     queue.active += 1;
-    const apiKey = queue.secrets.get(nextJobId);
+    const providerOverride = queue.overrides.get(nextJobId);
 
-    void processJob(nextJobId, apiKey)
+    void processJob(nextJobId, providerOverride)
       .catch(() => undefined)
       .finally(() => {
-        queue.secrets.delete(nextJobId);
+        queue.overrides.delete(nextJobId);
         queue.active -= 1;
         void pumpQueue();
       });
   }
 }
 
-export function enqueueJob(jobId: string, overrideApiKey?: string) {
+export function enqueueJob(jobId: string, providerOverride?: ProviderOverride) {
   const queue = getQueue();
   if (!queue.pending.includes(jobId)) {
     queue.pending.push(jobId);
   }
-  queue.secrets.set(jobId, overrideApiKey);
+  queue.overrides.set(jobId, providerOverride);
   void pumpQueue();
 }

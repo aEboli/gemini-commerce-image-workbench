@@ -1,5 +1,5 @@
-﻿import { COUNTRIES, IMAGE_TYPE_OPTIONS, OUTPUT_LANGUAGES, PLATFORMS, PRODUCT_CATEGORIES } from "@/lib/constants";
-import type { GeneratedCopyBundle, ImageType, TemplateRecord } from "@/lib/types";
+import { COUNTRIES, IMAGE_TYPE_OPTIONS, OUTPUT_LANGUAGES, PLATFORMS, PRODUCT_CATEGORIES } from "@/lib/constants";
+import type { BrandRecord, GeneratedCopyBundle, ImageType, TemplateRecord } from "@/lib/types";
 import { createId, nowIso } from "@/lib/utils";
 
 const platformStyles: Record<string, { tone: string; palette: string; layout: string }> = {
@@ -124,18 +124,49 @@ export function getImageTypeGuide(imageType: ImageType) {
   return imageTypeGuides[imageType];
 }
 
+function buildTemplateOverrideLines(template?: TemplateRecord | null) {
+  if (!template) {
+    return [];
+  }
+
+  return [
+    `Template name: ${template.name}.`,
+    `Template scope: country=${template.country}, language=${template.language}, platform=${template.platform}, category=${template.category}, imageType=${template.imageType}.`,
+    `Template prompt strategy: ${template.promptTemplate}`,
+    `Template copy strategy: ${template.copyTemplate}`,
+    `Template layout style: ${template.layoutStyle}`,
+  ];
+}
+
+function buildBrandOverrideLines(brandProfile?: BrandRecord | null) {
+  if (!brandProfile) {
+    return [];
+  }
+
+  return [
+    `Brand profile: ${brandProfile.name}.`,
+    `Brand primary color: ${brandProfile.primaryColor || "Not specified"}.`,
+    `Brand tone: ${brandProfile.tone || "Not specified"}.`,
+    `Brand banned terms: ${brandProfile.bannedTerms || "None specified"}.`,
+    `Brand guidance: ${brandProfile.promptGuidance || "Keep brand expression consistent and clean."}`,
+  ];
+}
+
 export function buildCopyPrompt(input: {
   country: string;
   language: string;
   platform: string;
   category: string;
   brandName: string;
+  brandProfile?: BrandRecord | null;
   productName: string;
   sellingPoints: string;
   restrictions: string;
+  sourceDescription: string;
   imageType: ImageType;
   ratio: string;
   resolutionLabel: string;
+  template?: TemplateRecord | null;
 }): string {
   const countryLabel = COUNTRIES.find((item) => item.value === input.country)?.label.en ?? input.country;
   const languageLabel = OUTPUT_LANGUAGES.find((item) => item.value === input.language)?.label.en ?? input.language;
@@ -148,12 +179,15 @@ export function buildCopyPrompt(input: {
     `You are an expert e-commerce creative strategist for ${platformLabel}.`,
     `Target market: ${countryLabel}. Output language: ${languageLabel}. Category: ${categoryLabel}.`,
     `Product name: ${input.productName}. Brand: ${input.brandName || "Not specified"}.`,
+    ...buildBrandOverrideLines(input.brandProfile),
     `Selling points: ${input.sellingPoints || "Not provided"}.`,
+    `Additional notes: ${input.sourceDescription || "Not provided"}.`,
     `Restrictions: ${input.restrictions || "Avoid hallucinating logos, text, and unsupported claims."}.`,
     `Creative goal: ${imageGuide.intent}`,
     `Platform tone: ${platformGuide.tone}. Platform palette: ${platformGuide.palette}.`,
     `Composition ratio: ${input.ratio}. Target resolution bucket: ${input.resolutionLabel}.`,
     `Copy focus: ${imageGuide.copyFocus}`,
+    ...buildTemplateOverrideLines(input.template),
     "Return concise, conversion-focused copy that is platform-appropriate and avoids prohibited claims.",
   ].join("\n");
 }
@@ -165,12 +199,15 @@ export function buildImagePrompt(input: {
   category: string;
   productName: string;
   brandName: string;
+  brandProfile?: BrandRecord | null;
   sellingPoints: string;
   restrictions: string;
+  sourceDescription: string;
   imageType: ImageType;
   ratio: string;
   resolutionLabel: string;
   copy: GeneratedCopyBundle;
+  template?: TemplateRecord | null;
 }): string {
   const imageGuide = getImageTypeGuide(input.imageType);
   const platformGuide = getPlatformStyle(input.platform);
@@ -178,13 +215,16 @@ export function buildImagePrompt(input: {
   return [
     `Edit the provided product image for a ${input.platform} listing in ${input.language} for market ${input.country}.`,
     `Keep the product identity, silhouette, materials, and recognizable shape consistent with the source image.`,
+    ...buildBrandOverrideLines(input.brandProfile),
     `Image type: ${input.imageType}. ${imageGuide.extraPrompt}`,
     `Target aspect ratio: ${input.ratio}. Aim for ${input.resolutionLabel} level fidelity.`,
     `Visual tone: ${platformGuide.tone}. Palette: ${platformGuide.palette}. Layout feel: ${platformGuide.layout}.`,
     `Core product highlights: ${input.sellingPoints || input.copy.highlights.join(", ")}.`,
+    `Additional product notes: ${input.sourceDescription || "Not provided."}.`,
     `Poster headline guidance: ${input.copy.posterHeadline}. Supporting subline: ${input.copy.posterSubline}.`,
     `Do not invent extra products, avoid distorted hands, avoid broken packaging, avoid unreadable text, avoid brand misuse.`,
     `Restrictions: ${input.restrictions || "No unsupported logos, pricing, or medical claims."}.`,
+    ...buildTemplateOverrideLines(input.template),
     `Optimized creative direction: ${input.copy.optimizedPrompt}`,
   ].join("\n");
 }

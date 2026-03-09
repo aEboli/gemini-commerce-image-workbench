@@ -4,6 +4,8 @@ export type JobStatus = "queued" | "processing" | "completed" | "failed" | "part
 
 export type JobItemStatus = "queued" | "processing" | "completed" | "failed";
 
+export type JobItemReviewStatus = "unreviewed" | "shortlisted" | "approved" | "rejected";
+
 export type ImageType =
   | "scene"
   | "white-background"
@@ -30,6 +32,20 @@ export interface AppSettings {
   defaultUiLanguage: UiLanguage;
 }
 
+export interface ProviderOverride {
+  apiKey?: string;
+  apiBaseUrl?: string;
+  apiVersion?: string;
+  apiHeaders?: string;
+}
+
+export interface LocalizedCreativeInputs {
+  productName: string;
+  sellingPoints: string;
+  restrictions: string;
+  sourceDescription: string;
+}
+
 export interface JobRecord {
   id: string;
   status: JobStatus;
@@ -54,6 +70,8 @@ export interface JobRecord {
   errorMessage: string | null;
   sourceDescription: string;
   uiLanguage: UiLanguage;
+  selectedTemplateOverrides: Record<string, string>;
+  localizedInputs: LocalizedCreativeInputs | null;
 }
 
 export interface JobItemRecord {
@@ -73,6 +91,7 @@ export interface JobItemRecord {
   copyJson: string | null;
   generatedAssetId: string | null;
   layoutAssetId: string | null;
+  reviewStatus: JobItemReviewStatus;
   createdAt: string;
   updatedAt: string;
   errorMessage: string | null;
@@ -107,6 +126,48 @@ export interface TemplateRecord {
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface TemplateFilters {
+  search?: string;
+  country?: string;
+  language?: string;
+  platform?: string;
+  category?: string;
+  imageType?: string;
+  source?: "all" | "default" | "custom";
+}
+
+export interface TemplateInput {
+  name: string;
+  country: string;
+  language: string;
+  platform: string;
+  category: string;
+  imageType: string;
+  promptTemplate: string;
+  copyTemplate: string;
+  layoutStyle: string;
+  isDefault?: boolean;
+}
+
+export interface BrandRecord {
+  id: string;
+  name: string;
+  primaryColor: string;
+  tone: string;
+  bannedTerms: string;
+  promptGuidance: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BrandInput {
+  name: string;
+  primaryColor: string;
+  tone: string;
+  bannedTerms: string;
+  promptGuidance: string;
 }
 
 export interface GeneratedCopyBundle {

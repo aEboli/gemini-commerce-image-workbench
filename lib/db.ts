@@ -7,15 +7,21 @@ import { getTemplateSeedData } from "@/lib/templates";
 import type {
   AppSettings,
   AssetRecord,
+  BrandInput,
+  BrandRecord,
   GeneratedCopyBundle,
   JobDetails,
   JobItemRecord,
+  JobItemReviewStatus,
   JobRecord,
   JobStatus,
+  LocalizedCreativeInputs,
+  TemplateFilters,
+  TemplateInput,
   TemplateRecord,
   UiLanguage,
 } from "@/lib/types";
-import { fromJson, nowIso, toJson } from "@/lib/utils";
+import { createId, fromJson, nowIso, toJson } from "@/lib/utils";
 
 declare global {
   var commerceStudioDb: DatabaseSync | undefined;
@@ -59,6 +65,7 @@ export interface CreateJobInput {
   batchFileCount: number;
   sourceDescription: string;
   uiLanguage: UiLanguage;
+  selectedTemplateOverrides: Record<string, string>;
   sourceAssets: AssetRecord[];
   items: JobItemRecord[];
 }
@@ -88,6 +95,8 @@ function rowToJob(row: any): JobRecord {
     errorMessage: row.error_message,
     sourceDescription: row.source_description,
     uiLanguage: row.ui_language,
+    selectedTemplateOverrides: fromJson(row.selected_template_overrides, {}),
+    localizedInputs: fromJson<LocalizedCreativeInputs | null>(row.localized_inputs_json, null),
   };
 }
 
@@ -109,6 +118,7 @@ function rowToItem(row: any): JobItemRecord {
     copyJson: row.copy_json,
     generatedAssetId: row.generated_asset_id,
     layoutAssetId: row.layout_asset_id,
+    reviewStatus: row.review_status ?? "unreviewed",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     errorMessage: row.error_message,
@@ -150,6 +160,19 @@ function rowToTemplate(row: any): TemplateRecord {
   };
 }
 
+function rowToBrand(row: any): BrandRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    primaryColor: row.primary_color,
+    tone: row.tone,
+    bannedTerms: row.banned_terms,
+    promptGuidance: row.prompt_guidance,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function ensureSettingsColumns(database: DatabaseSync) {
   const existingColumns = new Set(
     (database.prepare("PRAGMA table_info(settings)").all() as Array<{ name: string }>).map((column) => column.name),
@@ -167,6 +190,48 @@ function ensureSettingsColumns(database: DatabaseSync) {
     {
       name: "default_api_headers",
       statement: "ALTER TABLE settings ADD COLUMN default_api_headers TEXT NOT NULL DEFAULT ''",
+    },
+  ];
+
+  for (const column of columnDefinitions) {
+    if (!existingColumns.has(column.name)) {
+      database.exec(column.statement);
+    }
+  }
+}
+
+function ensureJobItemColumns(database: DatabaseSync) {
+  const existingColumns = new Set(
+    (database.prepare("PRAGMA table_info(job_items)").all() as Array<{ name: string }>).map((column) => column.name),
+  );
+
+  const columnDefinitions = [
+    {
+      name: "review_status",
+      statement: "ALTER TABLE job_items ADD COLUMN review_status TEXT NOT NULL DEFAULT 'unreviewed'",
+    },
+  ];
+
+  for (const column of columnDefinitions) {
+    if (!existingColumns.has(column.name)) {
+      database.exec(column.statement);
+    }
+  }
+}
+
+function ensureJobColumns(database: DatabaseSync) {
+  const existingColumns = new Set(
+    (database.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>).map((column) => column.name),
+  );
+
+  const columnDefinitions = [
+    {
+      name: "selected_template_overrides",
+      statement: "ALTER TABLE jobs ADD COLUMN selected_template_overrides TEXT NOT NULL DEFAULT '{}'",
+    },
+    {
+      name: "localized_inputs_json",
+      statement: "ALTER TABLE jobs ADD COLUMN localized_inputs_json TEXT",
     },
   ];
 
@@ -219,7 +284,9 @@ function ensureSchema(database: DatabaseSync) {
       completed_at TEXT,
       error_message TEXT,
       source_description TEXT NOT NULL,
-      ui_language TEXT NOT NULL
+      ui_language TEXT NOT NULL,
+      selected_template_overrides TEXT NOT NULL DEFAULT '{}',
+      localized_inputs_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS job_items (
@@ -239,6 +306,7 @@ function ensureSchema(database: DatabaseSync) {
       copy_json TEXT,
       generated_asset_id TEXT,
       layout_asset_id TEXT,
+      review_status TEXT NOT NULL DEFAULT 'unreviewed',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       error_message TEXT
@@ -275,14 +343,28 @@ function ensureSchema(database: DatabaseSync) {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS brands (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      primary_color TEXT NOT NULL,
+      tone TEXT NOT NULL,
+      banned_terms TEXT NOT NULL,
+      prompt_guidance TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
     CREATE INDEX IF NOT EXISTS idx_jobs_platform ON jobs(platform);
     CREATE INDEX IF NOT EXISTS idx_job_items_job_id ON job_items(job_id);
     CREATE INDEX IF NOT EXISTS idx_assets_job_id ON assets(job_id);
+    CREATE INDEX IF NOT EXISTS idx_brands_name ON brands(name);
   `);
 
   ensureSettingsColumns(database);
+  ensureJobColumns(database);
+  ensureJobItemColumns(database);
 
   const existingSettings = database.prepare("SELECT COUNT(*) as count FROM settings").get() as { count: number };
   if (existingSettings.count === 0) {
@@ -422,9 +504,218 @@ export function getDashboardStats(): DashboardStats {
   };
 }
 
-export function listTemplates(): TemplateRecord[] {
+function matchesTemplateScope(templateValue: string, targetValue: string) {
+  return templateValue === "*" || templateValue === targetValue;
+}
+
+function scoreTemplateMatch(template: TemplateRecord, input: {
+  country: string;
+  language: string;
+  platform: string;
+  category: string;
+  imageType: string;
+}) {
+  let score = 0;
+  if (template.country === input.country) score += 16;
+  if (template.language === input.language) score += 8;
+  if (template.platform === input.platform) score += 4;
+  if (template.category === input.category) score += 2;
+  if (template.imageType === input.imageType) score += 32;
+  return score;
+}
+
+export function listTemplates(filters: TemplateFilters = {}): TemplateRecord[] {
   const database = getDb();
-  return (database.prepare("SELECT * FROM templates ORDER BY is_default DESC, name ASC").all() as any[]).map(rowToTemplate);
+  const clauses: string[] = [];
+  const values: string[] = [];
+
+  if (filters.search) {
+    clauses.push("(name LIKE ? OR prompt_template LIKE ? OR copy_template LIKE ?)");
+    values.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`);
+  }
+  if (filters.country) {
+    clauses.push("country = ?");
+    values.push(filters.country);
+  }
+  if (filters.language) {
+    clauses.push("language = ?");
+    values.push(filters.language);
+  }
+  if (filters.platform) {
+    clauses.push("platform = ?");
+    values.push(filters.platform);
+  }
+  if (filters.category) {
+    clauses.push("category = ?");
+    values.push(filters.category);
+  }
+  if (filters.imageType) {
+    clauses.push("image_type = ?");
+    values.push(filters.imageType);
+  }
+  if (filters.source === "default") {
+    clauses.push("is_default = 1");
+  }
+  if (filters.source === "custom") {
+    clauses.push("is_default = 0");
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return (database.prepare(`SELECT * FROM templates ${where} ORDER BY is_default DESC, updated_at DESC, name ASC`).all(...values) as any[]).map(
+    rowToTemplate,
+  );
+}
+
+export function getTemplateById(templateId: string): TemplateRecord | null {
+  const database = getDb();
+  const row = database.prepare("SELECT * FROM templates WHERE id = ?").get(templateId) as any;
+  return row ? rowToTemplate(row) : null;
+}
+
+export function createTemplate(input: TemplateInput): TemplateRecord {
+  const database = getDb();
+  const now = nowIso();
+  const id = createId("tpl");
+
+  database
+    .prepare(
+      `INSERT INTO templates (
+        id, name, country, language, platform, category, image_type, prompt_template, copy_template, layout_style, is_default, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      input.name,
+      input.country,
+      input.language,
+      input.platform,
+      input.category,
+      input.imageType,
+      input.promptTemplate,
+      input.copyTemplate,
+      input.layoutStyle,
+      input.isDefault ? 1 : 0,
+      now,
+      now,
+    );
+
+  return getTemplateById(id)!;
+}
+
+export function updateTemplate(templateId: string, input: Partial<TemplateInput>): TemplateRecord | null {
+  const database = getDb();
+  const existing = getTemplateById(templateId);
+  if (!existing) {
+    return null;
+  }
+
+  const nextTemplate = {
+    name: input.name ?? existing.name,
+    country: input.country ?? existing.country,
+    language: input.language ?? existing.language,
+    platform: input.platform ?? existing.platform,
+    category: input.category ?? existing.category,
+    imageType: input.imageType ?? existing.imageType,
+    promptTemplate: input.promptTemplate ?? existing.promptTemplate,
+    copyTemplate: input.copyTemplate ?? existing.copyTemplate,
+    layoutStyle: input.layoutStyle ?? existing.layoutStyle,
+    isDefault: input.isDefault ?? existing.isDefault,
+  };
+
+  database
+    .prepare(
+      `UPDATE templates SET
+        name = ?,
+        country = ?,
+        language = ?,
+        platform = ?,
+        category = ?,
+        image_type = ?,
+        prompt_template = ?,
+        copy_template = ?,
+        layout_style = ?,
+        is_default = ?,
+        updated_at = ?
+      WHERE id = ?`
+    )
+    .run(
+      nextTemplate.name,
+      nextTemplate.country,
+      nextTemplate.language,
+      nextTemplate.platform,
+      nextTemplate.category,
+      nextTemplate.imageType,
+      nextTemplate.promptTemplate,
+      nextTemplate.copyTemplate,
+      nextTemplate.layoutStyle,
+      nextTemplate.isDefault ? 1 : 0,
+      nowIso(),
+      templateId,
+    );
+
+  return getTemplateById(templateId);
+}
+
+export function deleteTemplate(templateId: string): boolean {
+  const database = getDb();
+  const existing = getTemplateById(templateId);
+  if (!existing || existing.isDefault) {
+    return false;
+  }
+
+  const result = database.prepare("DELETE FROM templates WHERE id = ?").run(templateId);
+  return result.changes > 0;
+}
+
+export function resolveTemplate(input: {
+  country: string;
+  language: string;
+  platform: string;
+  category: string;
+  imageType: string;
+}): TemplateRecord | null {
+  const candidates = listTemplateCandidates(input).filter(
+    (template) =>
+      matchesTemplateScope(template.country, input.country) &&
+      matchesTemplateScope(template.language, input.language) &&
+      matchesTemplateScope(template.platform, input.platform) &&
+      matchesTemplateScope(template.category, input.category) &&
+      matchesTemplateScope(template.imageType, input.imageType),
+  );
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  return candidates.sort((left, right) => {
+    const scoreDelta = scoreTemplateMatch(right, input) - scoreTemplateMatch(left, input);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+    if (left.isDefault !== right.isDefault) {
+      return left.isDefault ? 1 : -1;
+    }
+    return right.updatedAt.localeCompare(left.updatedAt);
+  })[0] ?? null;
+}
+
+export function listTemplateCandidates(input: {
+  country: string;
+  language: string;
+  platform: string;
+  category: string;
+  imageType: string;
+}): TemplateRecord[] {
+  return listTemplates({ imageType: input.imageType }).sort((left, right) => {
+    const scoreDelta = scoreTemplateMatch(right, input) - scoreTemplateMatch(left, input);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+    if (left.isDefault !== right.isDefault) {
+      return left.isDefault ? 1 : -1;
+    }
+    return right.updatedAt.localeCompare(left.updatedAt);
+  });
 }
 
 export function createJob(input: CreateJobInput): JobRecord {
@@ -438,8 +729,8 @@ export function createJob(input: CreateJobInput): JobRecord {
         `INSERT INTO jobs (
           id, status, product_name, sku, category, brand_name, selling_points, restrictions, country, language, platform,
           selected_types, selected_ratios, selected_resolutions, variants_per_type, include_copy_layout,
-          batch_file_count, created_at, updated_at, source_description, ui_language
-        ) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          batch_file_count, created_at, updated_at, source_description, ui_language, selected_template_overrides
+        ) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.id,
@@ -462,6 +753,7 @@ export function createJob(input: CreateJobInput): JobRecord {
         now,
         input.sourceDescription,
         input.uiLanguage,
+        toJson(input.selectedTemplateOverrides),
       );
 
     const insertAsset = database.prepare(
@@ -490,8 +782,8 @@ export function createJob(input: CreateJobInput): JobRecord {
     const insertItem = database.prepare(
       `INSERT INTO job_items (
         id, job_id, source_asset_id, source_asset_name, image_type, ratio, resolution_label, width, height, variant_index,
-        status, prompt_text, negative_prompt, copy_json, generated_asset_id, layout_asset_id, created_at, updated_at, error_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        status, prompt_text, negative_prompt, copy_json, generated_asset_id, layout_asset_id, review_status, created_at, updated_at, error_message
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     for (const item of input.items) {
@@ -512,6 +804,7 @@ export function createJob(input: CreateJobInput): JobRecord {
         item.copyJson,
         item.generatedAssetId,
         item.layoutAssetId,
+        item.reviewStatus,
         item.createdAt,
         item.updatedAt,
         item.errorMessage,
@@ -632,6 +925,13 @@ export function updateJobStatus(jobId: string, status: JobStatus, errorMessage?:
     .run(status, errorMessage ?? null, nowIso(), isFinished ? nowIso() : null, jobId);
 }
 
+export function updateJobLocalizedInputs(jobId: string, localizedInputs: LocalizedCreativeInputs | null) {
+  const database = getDb();
+  database
+    .prepare("UPDATE jobs SET localized_inputs_json = ?, updated_at = ? WHERE id = ?")
+    .run(toJson(localizedInputs), nowIso(), jobId);
+}
+
 export function updateJobItemProcessing(itemId: string) {
   const database = getDb();
   database.prepare("UPDATE job_items SET status = 'processing', updated_at = ? WHERE id = ?").run(nowIso(), itemId);
@@ -701,4 +1001,79 @@ export function insertAsset(asset: AssetRecord) {
 export function listJobItems(jobId: string): JobItemRecord[] {
   const database = getDb();
   return (database.prepare("SELECT * FROM job_items WHERE job_id = ? ORDER BY created_at ASC").all(jobId) as any[]).map(rowToItem);
+}
+
+export function updateJobItemReviewStatus(itemId: string, reviewStatus: JobItemReviewStatus): JobItemRecord | null {
+  const database = getDb();
+  database.prepare("UPDATE job_items SET review_status = ?, updated_at = ? WHERE id = ?").run(reviewStatus, nowIso(), itemId);
+  return getJobItemById(itemId);
+}
+
+export function listBrands(): BrandRecord[] {
+  const database = getDb();
+  return (database.prepare("SELECT * FROM brands ORDER BY updated_at DESC, name ASC").all() as any[]).map(rowToBrand);
+}
+
+export function getBrandById(brandId: string): BrandRecord | null {
+  const database = getDb();
+  const row = database.prepare("SELECT * FROM brands WHERE id = ?").get(brandId) as any;
+  return row ? rowToBrand(row) : null;
+}
+
+export function getBrandByName(name: string): BrandRecord | null {
+  const database = getDb();
+  const row = database.prepare("SELECT * FROM brands WHERE LOWER(name) = LOWER(?)").get(name.trim()) as any;
+  return row ? rowToBrand(row) : null;
+}
+
+export function createBrand(input: BrandInput): BrandRecord {
+  const database = getDb();
+  const now = nowIso();
+  const id = createId("brand");
+  database
+    .prepare(
+      `INSERT INTO brands (
+        id, name, primary_color, tone, banned_terms, prompt_guidance, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(id, input.name.trim(), input.primaryColor, input.tone, input.bannedTerms, input.promptGuidance, now, now);
+
+  return getBrandById(id)!;
+}
+
+export function updateBrand(brandId: string, input: Partial<BrandInput>): BrandRecord | null {
+  const database = getDb();
+  const existing = getBrandById(brandId);
+  if (!existing) {
+    return null;
+  }
+
+  const nextBrand = {
+    name: input.name?.trim() ?? existing.name,
+    primaryColor: input.primaryColor ?? existing.primaryColor,
+    tone: input.tone ?? existing.tone,
+    bannedTerms: input.bannedTerms ?? existing.bannedTerms,
+    promptGuidance: input.promptGuidance ?? existing.promptGuidance,
+  };
+
+  database
+    .prepare(
+      `UPDATE brands SET
+        name = ?,
+        primary_color = ?,
+        tone = ?,
+        banned_terms = ?,
+        prompt_guidance = ?,
+        updated_at = ?
+      WHERE id = ?`
+    )
+    .run(nextBrand.name, nextBrand.primaryColor, nextBrand.tone, nextBrand.bannedTerms, nextBrand.promptGuidance, nowIso(), brandId);
+
+  return getBrandById(brandId);
+}
+
+export function deleteBrand(brandId: string): boolean {
+  const database = getDb();
+  const result = database.prepare("DELETE FROM brands WHERE id = ?").run(brandId);
+  return result.changes > 0;
 }

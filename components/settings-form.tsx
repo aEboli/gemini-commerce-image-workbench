@@ -24,15 +24,17 @@ export function SettingsForm({ initialSettings, language }: { initialSettings: A
             storageDir: "素材存储目录",
             maxConcurrency: "并发任务数",
             save: "保存设置",
-            saving: "保存中...",
+            saving: "保存中…",
             saved: "设置已保存",
             test: "测试连接",
-            testing: "测试中...",
+            testing: "测试中…",
             testOk: "连接成功",
             testFailed: "连接失败",
-            baseUrlHint: "留空表示走 Google 官方接口；使用中转站时填对方提供的 base_url。",
-            headersHint: "示例：{\"Authorization\":\"Bearer your-key\"}，如果中转站不需要额外请求头就留空。",
-            versionHint: "大多数 Gemini 兼容接口使用 v1beta。",
+            saveFailed: "保存失败。",
+            unknownError: "未知错误",
+            baseUrlHint: "留空表示使用 Google 官方 Gemini 接口；如果使用中转站，请填写对方提供的 base_url。",
+            headersHint: "示例：{\"Authorization\":\"Bearer your-key\"}。如果中转站不需要额外请求头，可以留空。",
+            versionHint: "大多数 Gemini 兼容中转站使用 v1beta。",
           }
         : {
             defaultApiKey: "Default API key",
@@ -44,12 +46,14 @@ export function SettingsForm({ initialSettings, language }: { initialSettings: A
             storageDir: "Asset storage directory",
             maxConcurrency: "Max concurrent jobs",
             save: "Save settings",
-            saving: "Saving...",
+            saving: "Saving…",
             saved: "Settings saved",
             test: "Test connection",
-            testing: "Testing...",
+            testing: "Testing…",
             testOk: "Connection succeeded",
             testFailed: "Connection failed",
+            saveFailed: "Save failed.",
+            unknownError: "Unknown error",
             baseUrlHint: "Leave blank for Google official Gemini API. For a relay, paste the provider's base_url here.",
             headersHint: "Example: {\"Authorization\":\"Bearer your-key\"}. Leave empty if your relay does not require extra headers.",
             versionHint: "Most Gemini-compatible relays use v1beta.",
@@ -72,7 +76,7 @@ export function SettingsForm({ initialSettings, language }: { initialSettings: A
 
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        setMessage(body?.error ?? "Save failed.");
+        setMessage(body?.error ?? text.saveFailed);
         return;
       }
 
@@ -94,7 +98,7 @@ export function SettingsForm({ initialSettings, language }: { initialSettings: A
 
       const body = (await response.json().catch(() => null)) as { error?: string; result?: string } | null;
       if (!response.ok) {
-        setTestMessage(`${text.testFailed}: ${body?.error ?? "Unknown error"}`);
+        setTestMessage(`${text.testFailed}: ${body?.error ?? text.unknownError}`);
         return;
       }
 
@@ -103,41 +107,72 @@ export function SettingsForm({ initialSettings, language }: { initialSettings: A
   }
 
   return (
-    <form className="panel form-panel narrow" onSubmit={handleSubmit}>
+    <form className="panel form-panel settings-form-panel" onSubmit={handleSubmit}>
       <label>
         <span>{text.defaultApiKey}</span>
-        <input type="password" value={formState.defaultApiKey} onChange={(event) => setFormState({ ...formState, defaultApiKey: event.target.value })} />
+        <input
+          type="password"
+          value={formState.defaultApiKey}
+          onChange={(event) => setFormState({ ...formState, defaultApiKey: event.target.value })}
+        />
       </label>
       <label>
         <span>{text.defaultApiBaseUrl}</span>
-        <input placeholder="https://your-relay-host.example" value={formState.defaultApiBaseUrl} onChange={(event) => setFormState({ ...formState, defaultApiBaseUrl: event.target.value })} />
+        <input
+          placeholder="https://your-relay-host.example"
+          value={formState.defaultApiBaseUrl}
+          onChange={(event) => setFormState({ ...formState, defaultApiBaseUrl: event.target.value })}
+        />
         <small className="helper">{text.baseUrlHint}</small>
       </label>
       <label>
         <span>{text.defaultApiVersion}</span>
-        <input value={formState.defaultApiVersion} onChange={(event) => setFormState({ ...formState, defaultApiVersion: event.target.value })} />
+        <input
+          value={formState.defaultApiVersion}
+          onChange={(event) => setFormState({ ...formState, defaultApiVersion: event.target.value })}
+        />
         <small className="helper">{text.versionHint}</small>
       </label>
       <label>
         <span>{text.defaultApiHeaders}</span>
-        <textarea rows={4} placeholder='{"Authorization":"Bearer your-key"}' value={formState.defaultApiHeaders} onChange={(event) => setFormState({ ...formState, defaultApiHeaders: event.target.value })} />
+        <textarea
+          rows={4}
+          placeholder='{"Authorization":"Bearer your-key"}'
+          value={formState.defaultApiHeaders}
+          onChange={(event) => setFormState({ ...formState, defaultApiHeaders: event.target.value })}
+        />
         <small className="helper">{text.headersHint}</small>
       </label>
       <label>
         <span>{text.defaultTextModel}</span>
-        <input value={formState.defaultTextModel} onChange={(event) => setFormState({ ...formState, defaultTextModel: event.target.value })} />
+        <input
+          value={formState.defaultTextModel}
+          onChange={(event) => setFormState({ ...formState, defaultTextModel: event.target.value })}
+        />
       </label>
       <label>
         <span>{text.defaultImageModel}</span>
-        <input value={formState.defaultImageModel} onChange={(event) => setFormState({ ...formState, defaultImageModel: event.target.value })} />
+        <input
+          value={formState.defaultImageModel}
+          onChange={(event) => setFormState({ ...formState, defaultImageModel: event.target.value })}
+        />
       </label>
       <label>
         <span>{text.storageDir}</span>
-        <input value={formState.storageDir} onChange={(event) => setFormState({ ...formState, storageDir: event.target.value })} />
+        <input
+          value={formState.storageDir}
+          onChange={(event) => setFormState({ ...formState, storageDir: event.target.value })}
+        />
       </label>
       <label>
         <span>{text.maxConcurrency}</span>
-        <input min={1} max={6} type="number" value={formState.maxConcurrency} onChange={(event) => setFormState({ ...formState, maxConcurrency: Number(event.target.value) || 1 })} />
+        <input
+          min={1}
+          max={6}
+          type="number"
+          value={formState.maxConcurrency}
+          onChange={(event) => setFormState({ ...formState, maxConcurrency: Number(event.target.value) || 1 })}
+        />
       </label>
       {message ? <p className="helper success-text">{message}</p> : null}
       {testMessage ? <p className="helper">{testMessage}</p> : null}
