@@ -1,177 +1,185 @@
-# 基于 Gemini 的电商生图工作台 / Commerce Image Studio
+<div align="center">
 
-> 面向电商运营、设计与商品团队的本地化 AI 出图工作台。  
-> A local-network friendly AI image generation workstation for ecommerce operators, designers, and merchandising teams.
+# 基于 Gemini 的电商生图工作台
+## Commerce Image Studio
 
-**版本 / Version:** `v0.2.0`  
-**最新 Windows 安装器 / Latest Windows installer:** `IMAGE-STUDIO-WINDOWS-0.2.0.exe`  
-**发布页 / Releases:** [GitHub Releases](https://github.com/zs827899031-alt/gemini-commerce-image-workbench/releases)  
-**中文操作说明 / Chinese guide:** [使用说明-简体中文.md](./使用说明-简体中文.md)
+面向电商运营、设计与商品团队的本地化 AI 生图工作台。  
+A local-network friendly AI image generation workstation for ecommerce operators, designers, and merchandising teams.
 
-## 核心能力 / What It Does
+**Version:** `v0.2.0`  
+**Latest Windows Installer:** `IMAGE-STUDIO-WINDOWS-0.2.0.exe`
 
-- 支持标准出图、提示词模式、参考图复刻三种创作方式。  
-  Supports three creation modes: standard generation, prompt mode, and reference remix.
-- 一次任务可组合多种图片类型、比例、分辨率和数量，适合批量出图。  
-  A single job can combine multiple image types, aspect ratios, resolutions, and quantities for batch production.
-- 生成结果同时覆盖纯图片、营销文案和文案排版图。  
-  Outputs include pure images, marketing copy, and copy-layout creatives.
-- 内置模板中心与品牌库，帮助统一不同市场、平台和品牌的视觉规则。  
-  Built-in templates and brand profiles help standardize output across markets, platforms, and brands.
-- 支持飞书多维表格自动同步，把生成结果落到团队协作表里。  
-  Supports automatic Feishu Bitable sync so generated assets can land directly in a team workspace.
-- 本地使用 SQLite 与文件存储，适合内网、单机和小团队协作场景。  
-  Uses SQLite plus local file storage, which fits LAN, single-PC, and small-team workflows.
+[Releases](https://github.com/zs827899031-alt/gemini-commerce-image-workbench/releases) · [中文操作说明](./使用说明-简体中文.md) · [Source Code](https://github.com/zs827899031-alt/gemini-commerce-image-workbench)
 
-## v0.2.0 新功能 / What’s New in v0.2.0
+</div>
 
-### 创作模式升级 / Creation Modes Upgraded
+---
 
-- 标准出图继续保留结构化商品信息输入，适合批量生成平台图。  
-  Standard mode keeps the structured product-input workflow for bulk marketplace output.
-- 新增提示词模式，可直接按自定义 prompt 出图，源商品图可选。  
-  Prompt mode lets users generate directly from a custom prompt, with source images optional.
-- 新增参考图复刻模式，可上传参考图并保留整体构图、层级和海报氛围。  
-  Reference remix mode accepts reference images and preserves overall composition, hierarchy, and poster feel.
+## 快速了解 / At a Glance
 
-### 飞书多维表格同步 / Feishu Bitable Sync
+Commerce Image Studio 是一个围绕“商品图批量生成、结果审核、团队协作同步”设计的桌面级工作台。它支持 Gemini 官方接口和 Gemini 兼容 relay，适合在本地、局域网和小团队环境中使用。  
+Commerce Image Studio is a production-oriented workstation for batch product image generation, result review, and team collaboration sync. It supports both official Gemini APIs and Gemini-compatible relay providers, and works well in local, LAN, or small-team environments.
 
-- 设置页新增飞书 App ID、App Secret、Bitable App Token、Table ID、字段映射等配置。  
-  The Settings page now includes Feishu app credentials, Bitable identifiers, and field-mapping configuration.
-- 支持飞书连接测试，保存设置前即可验证权限和映射是否正确。  
-  A dedicated connection test validates permissions and mapping before saving configuration.
-- 已支持大图同步，4K 图片也可以自动上传并创建多维表格记录。  
-  Large-image sync is now supported, including automatic upload and record creation for 4K assets.
+### 你可以用它做什么 / What Teams Use It For
 
-### 模板中心与品牌库 / Template Center and Brand Library
+| 中文 | English |
+| --- | --- |
+| 批量生成场景图、白底图、模特图、海报图、细节图和痛点图 | Batch-generate scene, white-background, model, poster, detail, and pain-point visuals |
+| 按国家、语言、平台和品牌规则输出更贴近市场的素材 | Produce market-aware assets by country, language, platform, and brand profile |
+| 直接用 prompt 出图，或参考已有海报进行复刻 | Generate directly from prompts or remix from an existing poster reference |
+| 审核结果并只导出“通过”的素材 | Review outputs and export only approved assets |
+| 自动把生成结果同步到飞书多维表格 | Automatically sync generated outputs into Feishu Bitable |
 
-- 模板中心支持默认模板、自定义模板、复制模板和模板匹配。  
-  The template center supports default templates, custom templates, duplication, and live matching.
-- 品牌库支持品牌档案、色彩和提示词约束，帮助维持品牌一致性。  
-  The brand library stores brand profiles, color direction, and prompt guidance for consistent output.
+## 版本亮点 / What’s New in v0.2.0
 
-### 结果审核与导出 / Review and Export
+| 新功能 | 说明 |
+| --- | --- |
+| 三种创作模式 | 支持标准出图、提示词模式、参考图复刻 |
+| 飞书多维表格同步 | 支持连接测试、字段映射、自动建记录、4K 图片同步 |
+| 模板中心升级 | 支持默认模板、自定义模板、复制模板、模板匹配 |
+| 品牌库 | 支持品牌档案、品牌色、提示词约束 |
+| 结果审核流 | 支持入选、通过、淘汰与通过项打包下载 |
+| 安全发布 | 安装器按版本命名，发布包自动清理密钥、任务记录与素材目录 |
 
-- 结果页支持入选、通过、淘汰等审核状态。  
-  Job results now support shortlist, approve, and reject review states.
-- 已通过结果可单独打包下载，方便交付和二次筛选。  
-  Approved results can be exported separately for delivery and downstream selection.
+### v0.2.0 in English
 
-### 安全发布能力 / Safe Release Packaging
+- Three creation modes: standard generation, prompt mode, and reference remix
+- Feishu Bitable sync with connection testing, field mapping, automatic record creation, and 4K image upload
+- Template center with default templates, custom variants, duplication, and matching
+- Brand library for consistent brand-driven output
+- Review workflow with shortlist, approve, reject, and approved-only export
+- Safe release packaging with versioned installers and sanitized release data
 
-- 新版本安装器按版本号输出，例如 `IMAGE-STUDIO-WINDOWS-0.2.0.exe`。  
-  Installers are now emitted with versioned filenames such as `IMAGE-STUDIO-WINDOWS-0.2.0.exe`.
-- 安全发布会清理默认 API Key、自定义请求头、飞书 App Secret、本地任务记录和素材目录。  
-  Safe packaging removes default API keys, custom headers, Feishu secrets, local job records, and asset history.
+## 产品亮点 / Product Highlights
 
-## 功能导览 / Product Tour
+### 创作模式 / Creation Modes
 
-### 总览 / Overview
+- **标准出图 / Standard Mode**  
+  适合结构化批量任务，围绕商品信息、平台、国家、语言和图片规格生成电商素材。  
+  Best for structured batch workflows driven by product metadata, platform, country, language, and image specs.
 
-- 首页用于快速查看工作台状态，包括累计任务、生成素材、可用模板和支持市场。  
-  The overview page acts as the workspace dashboard with totals for jobs, generated assets, templates, and supported markets.
-- 最近任务表帮助运营或设计快速回到正在审核、失败或需要复查的批次。  
-  The recent-jobs table helps operators jump back into batches that need review or troubleshooting.
+- **提示词模式 / Prompt Mode**  
+  可直接按自定义 prompt 出图，商品图可选，适合概念图、测试图和快速试错。  
+  Generate directly from a custom prompt with optional source images for concept work and rapid iteration.
+
+- **参考图复刻 / Reference Remix**  
+  上传参考海报后，尽量保留构图、层级和氛围，只替换成你的商品。  
+  Preserve the composition, hierarchy, and mood of a reference poster while swapping in your own product.
+
+### 协作与复用 / Collaboration and Reuse
+
+- **模板中心 / Template Center**  
+  让不同平台、市场和图片类型有更稳定的创作基线。  
+  Creates reusable creative baselines across platforms, markets, and image types.
+
+- **品牌库 / Brand Library**  
+  把品牌调性、颜色和提示词约束沉淀下来，减少每次重复输入。  
+  Stores brand tone, colors, and prompt guidance so teams do not need to redefine them every time.
+
+- **飞书同步 / Feishu Sync**  
+  成功生成后自动写入飞书多维表格，方便团队跟踪和交付。  
+  Automatically syncs successful results into Feishu Bitable for team tracking and delivery.
+
+### 发布与交付 / Distribution
+
+- **Windows 单文件安装器 / Windows Single-File Installer**  
+  直接分发给其他电脑使用，无需额外安装 Node.js。  
+  Distribute to other PCs without requiring a separate Node.js installation.
+
+- **安全发布 / Safe Packaging**  
+  发布包不会带上本机历史素材、任务记录和敏感配置。  
+  Release packages do not carry local asset history, job history, or sensitive credentials.
+
+## 界面预览 / Product Tour
+
+### 总览页 / Overview
+
+工作台首页聚合任务数量、素材数量、模板数量和支持市场，同时展示最近任务，适合做全局状态查看。  
+The overview screen summarizes job counts, asset counts, templates, and supported markets while surfacing recent tasks for quick operational awareness.
 
 ![Overview](docs/screenshots/overview.png)
 
 ### 创作台 / Studio
 
-- 创作台是主工作流入口，负责组织商品信息、市场信息、图片规格和批量参数。  
-  The studio is the main production surface for product metadata, market setup, image specs, and batch parameters.
-- 同一页面支持标准模式、提示词模式和参考图复刻，并支持多类型、多比例、多分辨率组合生成。  
-  It supports standard mode, prompt mode, and reference remix, plus mixed generation across types, ratios, and resolutions.
+创作台是主生产入口，用来组织商品信息、创作模式、图片类型、比例、分辨率、数量和临时 API 覆盖。  
+The studio is the primary production surface for product metadata, creation mode, image type, aspect ratio, resolution, quantity, and temporary API overrides.
 
 ![Studio](docs/screenshots/studio.png)
 
 ### 历史记录 / History
 
-- 历史记录页用于按商品名、SKU、平台、国家、语言、分辨率和日期回查任务。  
-  The history page filters past jobs by product name, SKU, platform, country, language, resolution, and date.
-- 对于失败任务和部分成功任务，这里是定位问题与回看批次的主要入口。  
-  It is also the primary place to revisit failed or partially completed batches.
+历史记录页用于筛选和回看旧任务，适合定位失败批次、查找特定平台或语言素材，以及回看历史输出。  
+The history page helps filter and revisit prior jobs, especially when locating failures, specific platforms or languages, and earlier output batches.
 
 ![History](docs/screenshots/history.png)
 
 ### 模板中心 / Templates
 
-- 模板中心用于维护不同平台、市场和图片类型的创意模板。  
-  The template center manages creative templates by platform, market, and image type.
-- 默认模板可作为基础，自定义模板可复制、编辑并参与实时匹配。  
-  Default templates act as baselines, while custom variants can be duplicated, edited, and matched live.
+模板中心用于筛选、复制、编辑和扩展模板，让生成逻辑更可控、更适合团队协作。  
+The template center supports filtering, duplicating, editing, and extending templates so creative logic becomes more controllable and reusable.
 
 ![Templates](docs/screenshots/templates.png)
 
 ### 任务详情 / Job Details
 
-- 任务详情页集中查看 prompt、文案、纯图、排版图、警告和失败原因。  
-  The job-details page centralizes prompts, copy, pure images, layout creatives, warnings, and failure reasons.
-- 这里也是审核结果、筛选素材、重新生成和导出已通过结果的主要工作区。  
-  It also serves as the main workspace for review actions, selective export, and reruns.
+任务详情页集中显示 prompt、文案、纯图、文案排版图、错误、警告和审核状态，是结果筛选与导出的主界面。  
+The job-details page centralizes prompts, copy, pure images, layout creatives, warnings, errors, and review states for final selection and export.
 
 ![Job Details](docs/screenshots/job-details.png)
 
-### 设置 / Settings
+### 设置页 / Settings
 
-- 设置页支持 Google Gemini 官方接口、Gemini 兼容 relay，以及飞书多维表格同步配置。  
-  The settings page supports official Google Gemini, Gemini-compatible relay providers, and Feishu Bitable sync.
-- 这里可以测试提供商连接、测试飞书连接，并配置字段映射与素材存储目录。  
-  Users can test provider connectivity, test Feishu connectivity, and configure field mapping and storage paths here.
+设置页统一管理 Gemini 官方接口、relay、飞书多维表格同步、字段映射和存储目录。  
+The settings page centralizes Gemini official API config, relay config, Feishu Bitable sync, field mapping, and storage settings.
 
 ![Settings](docs/screenshots/settings.png)
 
-## 典型使用流程 / Typical Workflow
+## 使用流程 / Typical Workflow
 
-1. 在设置页填写 Gemini 官方接口或 relay 配置，并按需启用飞书同步。  
+1. 在设置页配置 Gemini 官方接口或 relay，并按需启用飞书同步。  
    Configure official Gemini or a relay provider in Settings, and enable Feishu sync if needed.
-2. 在创作台选择创作模式，上传商品图或参考图，填写商品和市场信息。  
-   Choose a creation mode in Studio, upload product or reference images, and fill in product and market details.
-3. 选择图片类型、比例、分辨率与数量，提交批量任务。  
-   Select image types, aspect ratios, resolutions, and quantity, then submit the batch job.
-4. 等待系统生成图片、文案与排版图，并在任务详情页查看结果。  
-   Let the system generate images, copy, and layout creatives, then review them in Job Details.
-5. 对结果执行入选、通过、淘汰，必要时重新生成或导出通过项。  
-   Review the outputs, approve or reject them, rerun when needed, and export approved items.
-6. 如果启用了飞书同步，生成成功的图片会自动写入多维表格记录。  
-   If Feishu sync is enabled, successful results are automatically written into Bitable records.
+2. 在创作台选择模式，上传商品图或参考图。  
+   Choose a creation mode and upload source or reference images in Studio.
+3. 填写商品、市场、语言、平台和规格参数。  
+   Fill in product, market, language, platform, and output parameters.
+4. 提交批量任务，等待系统生成图片、文案与排版图。  
+   Submit the batch job and let the system generate images, copy, and layout creatives.
+5. 在任务详情页审核结果，执行入选、通过或淘汰。  
+   Review outputs in Job Details and mark them as shortlisted, approved, or rejected.
+6. 导出通过项，或将成功结果自动同步到飞书多维表格。  
+   Export approved assets or let successful results sync automatically into Feishu Bitable.
 
-## 运行与安装 / Installation and Running
+## 安装与运行 / Installation and Running
 
 ### Windows 安装器 / Windows Installer
 
-- 推荐从 [GitHub Releases](https://github.com/zs827899031-alt/gemini-commerce-image-workbench/releases) 下载单文件安装器。  
-  Download the single-file installer from [GitHub Releases](https://github.com/zs827899031-alt/gemini-commerce-image-workbench/releases).
-- 当前版本安装器命名为 `IMAGE-STUDIO-WINDOWS-0.2.0.exe`。  
-  The current installer is named `IMAGE-STUDIO-WINDOWS-0.2.0.exe`.
-- 安装器内置运行时，目标机器不需要手动安装 Node.js。  
-  The installer bundles its own runtime, so the target machine does not need a separate Node.js installation.
+- 推荐从 [GitHub Releases](https://github.com/zs827899031-alt/gemini-commerce-image-workbench/releases) 下载  
+  Recommended download source: [GitHub Releases](https://github.com/zs827899031-alt/gemini-commerce-image-workbench/releases)
+- 当前安装器命名为 `IMAGE-STUDIO-WINDOWS-0.2.0.exe`  
+  The current installer is named `IMAGE-STUDIO-WINDOWS-0.2.0.exe`
+- 安装器内置运行时，不需要额外安装 Node.js  
+  The installer bundles its own runtime, so Node.js is not required on the target machine
 
 ### 从源码运行 / Run from Source
 
-如果你直接拉取源码仓库，可以使用以下方式启动。  
-If you are running from the source repository, use one of the following options.
-
-**方式一：双击启动 / Option 1: launcher**
+**方式一 / Option 1**
 
 - 双击 `启动正式版.bat`  
   Double-click `启动正式版.bat`
 
-**方式二：开发模式 / Option 2: development mode**
+**方式二 / Option 2**
 
 ```bash
 npm install
 npm run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-**常用地址 / Common URLs**
+**访问地址 / URLs**
 
 - 本机 / Local: `http://127.0.0.1:3000`
 - 局域网 / LAN: `http://<your-local-ip>:3000`
 
 ## 发布方式 / Release Artifacts
-
-当前仓库以源码为主，安装器和安全发布包通过脚本生成。  
-This repository focuses on source code; installers and safe release packages are produced by scripts.
 
 常用发布命令 / Common release commands:
 
@@ -181,70 +189,60 @@ npm run package:release:safe:zip
 npm run package:installer:exe:safe
 ```
 
-安全发布包含以下约束 / Safe packaging guarantees:
+安全发布会自动清理以下内容 / Safe packaging clears the following:
 
-- 清理默认 API Key  
-  Clears the default API key
-- 清理自定义请求头  
-  Clears custom request headers
-- 清理飞书 App Secret  
-  Clears the Feishu app secret
-- 清理本地任务记录  
-  Removes local job history from the bundled database
-- 清空本地素材目录  
-  Ships an empty local asset directory instead of your historical generated files
+- 默认 API Key / Default API key
+- 自定义请求头 / Custom request headers
+- 飞书 App Secret / Feishu app secret
+- 本地任务记录 / Local job history
+- 本地素材目录 / Local asset directory
 
-这意味着发布包适合分发给其他电脑使用，但接收方需要自行填写自己的 API 和飞书配置。  
-This means the package is safe to distribute to other machines, but recipients must enter their own API and Feishu settings.
+这意味着发布包更适合直接交付给其他电脑使用，但接收方需要自行填写自己的 API 与飞书配置。  
+This makes the package safer to distribute to other machines, while recipients still need to enter their own API and Feishu settings.
 
 ## FAQ / 常见问题
 
-### 支持哪些模型和接口？ / Which providers are supported?
+### 支持哪些接口？ / Which providers are supported?
 
-支持 Google Gemini 官方接口，以及兼容 Gemini 请求格式的 relay 或中转服务。  
-The app supports the official Google Gemini API and relay providers that expose Gemini-compatible endpoints.
+支持 Google Gemini 官方接口，以及 Gemini 兼容 relay。  
+The app supports the official Google Gemini API and Gemini-compatible relay providers.
 
 ### 提示词模式一定要上传商品图吗？ / Does prompt mode require a source image?
 
-不一定。提示词模式可以直接根据自定义 prompt 出图，商品图是可选输入。  
-No. Prompt mode can generate directly from a custom prompt, with source images treated as optional context.
+不一定，提示词模式支持直接按 prompt 出图。  
+No. Prompt mode can generate directly from a custom prompt.
 
 ### 参考图复刻适合什么场景？ / When should I use reference remix?
 
-当你希望尽量保留参考海报的构图、层级、氛围和视觉方向，只替换成自己的商品时，适合使用参考图复刻。  
-Use reference remix when you want to preserve the composition, hierarchy, mood, and layout of a reference poster while swapping in your own product.
+当你希望尽量保留参考海报的构图、层级与氛围，只替换成自己的商品时，参考图复刻是最合适的模式。  
+Use reference remix when you want to preserve the composition, hierarchy, and mood of an existing poster while replacing the product.
 
 ### 飞书同步现在支持到什么程度？ / How complete is Feishu sync now?
 
-当前版本支持设置页测试连接、字段映射校验、自动建记录，以及小图到 4K 图片的自动同步。  
-The current version supports connection testing, field-mapping validation, automatic record creation, and automatic sync from smaller outputs up to 4K images.
+当前版本支持设置页测试连接、字段映射校验、自动建记录，以及从小图到 4K 图片的自动同步。  
+The current version supports connection testing, field-mapping validation, automatic record creation, and automatic sync from smaller images up to 4K.
 
 如果同步失败，优先检查以下内容：  
 If sync fails, check the following first:
 
 - 飞书应用权限 / Feishu app permissions
-- 多维表格字段映射 JSON / Bitable field-mapping JSON
-- `parent_type` 是否符合你的应用要求 / Whether `parent_type` matches your app setup
-- 目标表字段类型是否正确 / Whether the target field types are correct
+- 字段映射 JSON / Field-mapping JSON
+- `parent_type` 配置 / `parent_type` configuration
+- 目标表字段类型 / Target field types
 
-### 安全发布会清掉哪些内容？ / What does safe packaging remove?
+### 为什么仓库里没有安装器文件？ / Why aren’t installer binaries stored in the repository?
 
-安全发布会移除敏感配置和本机运行痕迹，包括默认密钥、自定义请求头、飞书 Secret、本地任务记录和本地素材。  
-Safe packaging removes sensitive configuration and local runtime traces, including default keys, custom headers, Feishu secrets, local jobs, and local assets.
-
-### 这个仓库里为什么看不到安装器？ / Why aren’t installer files stored in the repository?
-
-仓库主要保存源码；发布产物通过打包脚本生成，并放到 GitHub Releases 分发。  
-The repository stores source code; release artifacts are generated by packaging scripts and distributed through GitHub Releases.
+仓库主要保存源码；安装器和发布产物通过脚本生成，并放到 GitHub Releases。  
+The repository stores source code; installers and release artifacts are generated by scripts and published through GitHub Releases.
 
 ## 仓库说明 / Repository Notes
 
-- 当前主 README 是本文件，面向 GitHub 访客和潜在使用者。  
-  This file is the main public-facing README for GitHub visitors and potential users.
-- 更详细的中文操作说明位于 [使用说明-简体中文.md](./使用说明-简体中文.md)。  
-  A more detailed Chinese operator guide lives in [使用说明-简体中文.md](./使用说明-简体中文.md).
-- `release`、`data`、本地数据库、构建输出和临时文件不会提交到源码仓库。  
-  `release`, `data`, local databases, build output, and temporary files are excluded from source control.
+- 本文件是面向 GitHub 访客和潜在使用者的主 README  
+  This file is the main public-facing README for GitHub visitors and potential users
+- 更详细的中文操作说明见 [使用说明-简体中文.md](./使用说明-简体中文.md)  
+  A more detailed Chinese operator guide is available in [使用说明-简体中文.md](./使用说明-简体中文.md)
+- `release`、`data`、本地数据库、构建输出和临时文件不会提交到源码仓库  
+  `release`, `data`, local databases, build output, and temporary files are excluded from source control
 
 ## License
 
