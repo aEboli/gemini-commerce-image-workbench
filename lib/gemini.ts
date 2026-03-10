@@ -1,7 +1,23 @@
 import { GoogleGenAI } from "@google/genai";
 
-import { buildCopyPrompt, buildImagePrompt } from "@/lib/templates";
-import type { BrandRecord, GeneratedCopyBundle, ImageType, LocalizedCreativeInputs, TemplateRecord } from "@/lib/types";
+import {
+  buildCopyPrompt,
+  buildImagePrompt,
+  buildPromptModePrompt,
+  buildReferenceDirectRemakePrompt,
+  toGeneratedCopyBundleFromRemakePoster,
+} from "@/lib/templates";
+import type {
+  BrandRecord,
+  GeneratedCopyBundle,
+  ImageType,
+  LocalizedCreativeInputs,
+  ProviderDebugInfo,
+  ReferenceLayoutAnalysis,
+  ReferencePosterCopy,
+  TemplateRecord,
+  UiLanguage,
+} from "@/lib/types";
 
 const translationSchema = {
   type: "object",
@@ -39,6 +55,110 @@ const copySchema = {
   },
 } as const;
 
+const referenceLayoutSchema = {
+  type: "object",
+  required: [
+    "summary",
+    "posterStyle",
+    "backgroundType",
+    "primaryProductPlacement",
+    "packagingPresent",
+    "packagingPlacement",
+    "productPackagingRelationship",
+    "supportingProps",
+    "palette",
+    "cameraAngle",
+    "depthAndLighting",
+    "topBanner",
+    "headline",
+    "subheadline",
+    "bottomBanner",
+    "callouts",
+  ],
+  properties: {
+    summary: { type: "string" },
+    posterStyle: { type: "string" },
+    backgroundType: { type: "string" },
+    primaryProductPlacement: { type: "string" },
+    packagingPresent: { type: "boolean" },
+    packagingPlacement: { type: "string" },
+    productPackagingRelationship: { type: "string" },
+    supportingProps: { type: "array", items: { type: "string" } },
+    palette: { type: "array", items: { type: "string" } },
+    cameraAngle: { type: "string" },
+    depthAndLighting: { type: "string" },
+    topBanner: {
+      type: "object",
+      properties: {
+        present: { type: "boolean" },
+        placement: { type: "string" },
+        style: { type: "string" },
+        sourceText: { type: "string" },
+      },
+    },
+    headline: {
+      type: "object",
+      properties: {
+        present: { type: "boolean" },
+        placement: { type: "string" },
+        style: { type: "string" },
+        sourceText: { type: "string" },
+      },
+    },
+    subheadline: {
+      type: "object",
+      properties: {
+        present: { type: "boolean" },
+        placement: { type: "string" },
+        style: { type: "string" },
+        sourceText: { type: "string" },
+      },
+    },
+    bottomBanner: {
+      type: "object",
+      properties: {
+        present: { type: "boolean" },
+        placement: { type: "string" },
+        style: { type: "string" },
+        sourceText: { type: "string" },
+      },
+    },
+    callouts: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          placement: { type: "string" },
+          style: { type: "string" },
+          sourceText: { type: "string" },
+          iconHint: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+
+const promptTranslationSchema = {
+  type: "object",
+  properties: {
+    customPrompt: { type: "string" },
+    customNegativePrompt: { type: "string" },
+  },
+} as const;
+
+const referencePosterCopySchema = {
+  type: "object",
+  required: ["summary", "topBanner", "headline", "subheadline", "bottomBanner", "callouts"],
+  properties: {
+    summary: { type: "string" },
+    topBanner: { type: "string" },
+    headline: { type: "string" },
+    subheadline: { type: "string" },
+    bottomBanner: { type: "string" },
+    callouts: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
 interface ProviderConfig {
   apiKey: string;
   apiBaseUrl?: string;
@@ -68,6 +188,27 @@ function extractImageUrlFromText(text: string) {
 
   const directMatch = text.match(/https?:\/\/[^\s]+?\.(?:png|jpg|jpeg|webp|gif)(?:\?[^\s]*)?/i);
   return directMatch?.[0] ?? null;
+}
+
+async function fetchImageWithRetries(url: string, attempts = 3) {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Unknown image fetch failure");
 }
 
 function parseHeadersJson(rawHeaders?: string): Record<string, string> | undefined {
@@ -270,12 +411,281 @@ export async function generateCopyBundle(input: {
   };
 }
 
+export async function optimizeUserImagePrompt(input: {
+  apiKey: string;
+  textModel: string;
+  apiBaseUrl?: string;
+  apiVersion?: string;
+  apiHeaders?: string;
+  country: string;
+  language: string;
+  platform: string;
+  category: string;
+  productName: string;
+  brandName: string;
+  sellingPoints: string;
+  restrictions: string;
+  sourceDescription: string;
+  imageType: ImageType;
+  ratio: string;
+  resolutionLabel: string;
+  customPrompt: string;
+  customNegativePrompt?: string;
+}): Promise<string> {
+  const ai = createClient(input);
+  const lines = [
+    "You are an e-commerce image prompt optimizer.",
+    `Rewrite the user's image prompt into one strong plain-text prompt for ${input.platform} in ${input.language} for market ${input.country}.`,
+    "Return plain text only. Do not return JSON, markdown, bullet lists, or explanations.",
+    "Keep the user's main creative intent, but make it more image-model friendly, concise, and commercially usable.",
+    "Always preserve the uploaded product identity, shape, material, label placement, and key visual truth.",
+    `Product name: ${input.productName}. Brand: ${input.brandName || "Not specified"}. Category: ${input.category}.`,
+    `Selling points: ${input.sellingPoints || "Not provided"}.`,
+    `Additional notes: ${input.sourceDescription || "Not provided"}.`,
+    `Restrictions: ${input.restrictions || "No unsupported logos, pricing, or medical claims."}.`,
+    `Preferred image type: ${input.imageType}.`,
+    `Target aspect ratio: ${input.ratio}. Resolution bucket: ${input.resolutionLabel}.`,
+    `User prompt: ${input.customPrompt}`,
+    input.customNegativePrompt?.trim() ? `Negative prompt / avoid: ${input.customNegativePrompt.trim()}` : "",
+  ];
+
+  const response = await ai.models.generateContent({
+    model: input.textModel,
+    contents: lines.join("\n"),
+    config: {
+      temperature: 0.35,
+    },
+  });
+
+  return (response.text ?? input.customPrompt).trim();
+}
+
+export async function translateUserPromptInputs(input: {
+  apiKey: string;
+  textModel: string;
+  apiBaseUrl?: string;
+  apiVersion?: string;
+  apiHeaders?: string;
+  country: string;
+  language: string;
+  platform: string;
+  customPrompt: string;
+  customNegativePrompt?: string;
+}): Promise<{ customPrompt: string; customNegativePrompt: string }> {
+  const hasPrompt = Boolean(input.customPrompt.trim());
+  const hasNegativePrompt = Boolean(input.customNegativePrompt?.trim());
+
+  if (!hasPrompt && !hasNegativePrompt) {
+    return {
+      customPrompt: input.customPrompt,
+      customNegativePrompt: input.customNegativePrompt?.trim() || "",
+    };
+  }
+
+  const lines = [
+    "You are a localization specialist for image-generation prompts.",
+    `Translate the user's prompt content into the target output language ${input.language} for market ${input.country} and platform ${input.platform}.`,
+    "Rules:",
+    "- Return JSON only.",
+    "- Preserve the user's visual intent faithfully.",
+    "- Keep the result concise and image-model friendly, but do not rewrite or optimize beyond translation and light normalization.",
+    "- If the text is already appropriate for the target language, keep it with only light normalization.",
+    "- Keep brand names, product names, units, model names, and proper nouns unchanged unless a natural localized form is clearly better.",
+    "- Do not add new claims, details, or styling instructions that were not present in the source text.",
+  ];
+
+  if (hasPrompt) {
+    lines.push(`Prompt: ${input.customPrompt}`);
+  }
+
+  if (hasNegativePrompt) {
+    lines.push(`Negative prompt: ${input.customNegativePrompt?.trim()}`);
+  }
+
+  const ai = createClient(input);
+  const response = await ai.models.generateContent({
+    model: input.textModel,
+    contents: lines.join("\n"),
+    config: {
+      responseMimeType: "application/json",
+      responseJsonSchema: promptTranslationSchema,
+      temperature: 0.2,
+    },
+  });
+
+  const parsed = JSON.parse(response.text ?? "{}") as {
+    customPrompt?: string;
+    customNegativePrompt?: string;
+  };
+
+  return {
+    customPrompt: hasPrompt ? parsed.customPrompt?.trim() || input.customPrompt.trim() : "",
+    customNegativePrompt: hasNegativePrompt ? parsed.customNegativePrompt?.trim() || input.customNegativePrompt?.trim() || "" : "",
+  };
+}
+
+function uiLanguageName(uiLanguage: UiLanguage) {
+  return uiLanguage === "zh" ? "Simplified Chinese" : "English";
+}
+
+function normalizeReferenceZone(zone?: {
+  present?: boolean;
+  placement?: string;
+  style?: string;
+  sourceText?: string;
+}) {
+  return {
+    present: Boolean(zone?.present),
+    placement: zone?.placement?.trim() || "",
+    style: zone?.style?.trim() || "",
+    sourceText: zone?.sourceText?.trim() || "",
+  };
+}
+
+export async function analyzeReferenceLayout(input: {
+  apiKey: string;
+  textModel: string;
+  apiBaseUrl?: string;
+  apiVersion?: string;
+  apiHeaders?: string;
+  uiLanguage: UiLanguage;
+  referenceImage: { mimeType: string; buffer: Buffer };
+}): Promise<ReferenceLayoutAnalysis> {
+  const ai = createClient(input);
+  const response = await ai.models.generateContent({
+    model: input.textModel,
+    contents: [
+      {
+        inlineData: {
+          mimeType: input.referenceImage.mimeType,
+          data: input.referenceImage.buffer.toString("base64"),
+        },
+      },
+      {
+        text: [
+          "You are analyzing an e-commerce poster reference image for a poster remake workflow.",
+          `Return descriptions in ${uiLanguageName(input.uiLanguage)}.`,
+          "Identify the poster structure precisely instead of summarizing it loosely.",
+          "Focus on layout and composition, not only product category.",
+          "Extract whether the poster contains: top banner, main headline, subheadline, bottom banner, callout badges, packaging/secondary product, background scene, props, and main product placement.",
+          "The implementer will later replace the reference product with another uploaded product, so describe the structure in a reusable way.",
+          "For text zones, capture whether they exist, where they are, their visual style, and the original text if readable.",
+          "Return JSON only.",
+        ].join("\n"),
+      },
+    ],
+    config: {
+      responseMimeType: "application/json",
+      responseJsonSchema: referenceLayoutSchema,
+      temperature: 0.2,
+    },
+  });
+
+  const parsed = JSON.parse(response.text ?? "{}") as Partial<ReferenceLayoutAnalysis>;
+  return {
+    summary: parsed.summary?.trim() || "",
+    posterStyle: parsed.posterStyle?.trim() || "",
+    backgroundType: parsed.backgroundType?.trim() || "",
+    primaryProductPlacement: parsed.primaryProductPlacement?.trim() || "",
+    packagingPresent: Boolean(parsed.packagingPresent),
+    packagingPlacement: parsed.packagingPlacement?.trim() || "",
+    productPackagingRelationship: parsed.productPackagingRelationship?.trim() || "",
+    supportingProps: (parsed.supportingProps ?? []).map((value) => value.trim()).filter(Boolean),
+    palette: (parsed.palette ?? []).map((value) => value.trim()).filter(Boolean),
+    cameraAngle: parsed.cameraAngle?.trim() || "",
+    depthAndLighting: parsed.depthAndLighting?.trim() || "",
+    topBanner: normalizeReferenceZone(parsed.topBanner),
+    headline: normalizeReferenceZone(parsed.headline),
+    subheadline: normalizeReferenceZone(parsed.subheadline),
+    bottomBanner: normalizeReferenceZone(parsed.bottomBanner),
+    callouts: (parsed.callouts ?? []).map((callout) => ({
+      placement: callout.placement?.trim() || "",
+      style: callout.style?.trim() || "",
+      sourceText: callout.sourceText?.trim() || "",
+      iconHint: callout.iconHint?.trim() || "",
+    })),
+  };
+}
+
+export async function generateRemakePosterCopy(input: {
+  apiKey: string;
+  textModel: string;
+  apiBaseUrl?: string;
+  apiVersion?: string;
+  apiHeaders?: string;
+  country: string;
+  language: string;
+  platform: string;
+  category: string;
+  productName: string;
+  brandName: string;
+  sellingPoints: string;
+  restrictions: string;
+  sourceDescription: string;
+  referenceLayout: ReferenceLayoutAnalysis;
+}): Promise<ReferencePosterCopy> {
+  const ai = createClient(input);
+  const calloutCount = input.referenceLayout.callouts.length;
+  const response = await ai.models.generateContent({
+    model: input.textModel,
+    contents: [
+      "You are rewriting copy for an e-commerce poster remake.",
+      `Output language: ${input.language}. Market: ${input.country}. Platform: ${input.platform}. Category: ${input.category}.`,
+      "You must preserve the reference poster's text hierarchy and slot count instead of inventing a new ad structure.",
+      `Reference poster summary: ${input.referenceLayout.summary}.`,
+      `Top banner present: ${input.referenceLayout.topBanner.present}. Source text: ${input.referenceLayout.topBanner.sourceText || "N/A"}.`,
+      `Headline present: ${input.referenceLayout.headline.present}. Source text: ${input.referenceLayout.headline.sourceText || "N/A"}.`,
+      `Subheadline present: ${input.referenceLayout.subheadline.present}. Source text: ${input.referenceLayout.subheadline.sourceText || "N/A"}.`,
+      `Bottom banner present: ${input.referenceLayout.bottomBanner.present}. Source text: ${input.referenceLayout.bottomBanner.sourceText || "N/A"}.`,
+      `Callout count to preserve: ${calloutCount}. Existing callout texts: ${input.referenceLayout.callouts.map((item) => item.sourceText || "N/A").join(" | ") || "none"}.`,
+      `Product name: ${input.productName}. Brand: ${input.brandName || "Not specified"}.`,
+      `Selling points: ${input.sellingPoints || "Not provided"}.`,
+      `Additional notes: ${input.sourceDescription || "Not provided"}.`,
+      `Restrictions: ${input.restrictions || "No unsupported claims."}.`,
+      "Rules:",
+      "- Keep copy concise and suited for a poster, not for a product description page.",
+      "- Preserve the number of visible slots from the reference poster whenever possible.",
+      "- If a text zone is absent in the reference, return an empty string for that field.",
+      "- If there are no callout badges, return an empty array.",
+      "- Do not invent pricing, medical claims, certifications, or unsupported slogans.",
+      "Return JSON only.",
+    ].join("\n"),
+    config: {
+      responseMimeType: "application/json",
+      responseJsonSchema: referencePosterCopySchema,
+      temperature: 0.4,
+    },
+  });
+
+  const parsed = JSON.parse(response.text ?? "{}") as Partial<ReferencePosterCopy>;
+  const maxCallouts = input.referenceLayout.callouts.length;
+  return {
+    summary: parsed.summary?.trim() || "",
+    topBanner: input.referenceLayout.topBanner.present ? parsed.topBanner?.trim() || "" : "",
+    headline: input.referenceLayout.headline.present ? parsed.headline?.trim() || "" : "",
+    subheadline: input.referenceLayout.subheadline.present ? parsed.subheadline?.trim() || "" : "",
+    bottomBanner: input.referenceLayout.bottomBanner.present ? parsed.bottomBanner?.trim() || "" : "",
+    callouts: (parsed.callouts ?? [])
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .slice(0, maxCallouts),
+  };
+}
+
 export async function generateEditedImage(input: {
   apiKey: string;
   imageModel: string;
   apiBaseUrl?: string;
   apiVersion?: string;
   apiHeaders?: string;
+  creationMode?: "standard" | "reference-remix" | "prompt";
+  referenceStrength?: "reference" | "balanced" | "product";
+  preserveReferenceText?: boolean;
+  customPromptText?: string;
+  customNegativePrompt?: string;
+  referenceExtraPrompt?: string;
+  referenceNegativePrompt?: string;
+  remakePromptVariant?: "strict" | "fallback";
   country: string;
   language: string;
   platform: string;
@@ -290,6 +700,8 @@ export async function generateEditedImage(input: {
   ratio: string;
   resolutionLabel: string;
   copy: GeneratedCopyBundle;
+  referenceLayout?: ReferenceLayoutAnalysis | null;
+  referencePosterCopy?: ReferencePosterCopy | null;
   template?: TemplateRecord | null;
   sourceImages: Array<{ mimeType: string; buffer: Buffer }>;
 }) {
@@ -302,23 +714,81 @@ export async function generateEditedImage(input: {
     imageConfig.imageSize = input.resolutionLabel;
   }
 
-  const response = await ai.models.generateContent({
-    model: input.imageModel,
-    contents: [
-      ...input.sourceImages.map((image) => ({
-        inlineData: {
-          mimeType: image.mimeType,
-          data: image.buffer.toString("base64"),
-        },
-      })),
-      { text: buildImagePrompt(input) },
-    ],
-    config: {
-      responseModalities: ["TEXT", "IMAGE"],
-      imageConfig,
-      temperature: 0.7,
-    },
-  });
+  const promptText =
+    input.creationMode === "prompt" && input.customPromptText
+      ? input.customPromptText
+      : input.creationMode === "reference-remix"
+      ? buildReferenceDirectRemakePrompt({
+          country: input.country,
+          language: input.language,
+          platform: input.platform,
+          category: input.category,
+          productName: input.productName,
+          brandName: input.brandName,
+          brandProfile: input.brandProfile,
+          sellingPoints: input.sellingPoints,
+          restrictions: input.restrictions,
+          sourceDescription: input.sourceDescription,
+          ratio: input.ratio,
+          resolutionLabel: input.resolutionLabel,
+          referenceStrength: input.referenceStrength ?? "balanced",
+          preserveReferenceText: input.preserveReferenceText ?? true,
+          referenceExtraPrompt: input.referenceExtraPrompt,
+          referenceNegativePrompt: input.referenceNegativePrompt,
+          referenceLayoutHints: input.referenceLayout,
+          referencePosterCopyHints: input.referencePosterCopy,
+          promptVariant: input.remakePromptVariant ?? "strict",
+        })
+      : input.creationMode === "prompt"
+        ? buildPromptModePrompt({
+            country: input.country,
+            language: input.language,
+            platform: input.platform,
+            category: input.category,
+            productName: input.productName,
+            brandName: input.brandName,
+            brandProfile: input.brandProfile,
+            sellingPoints: input.sellingPoints,
+            restrictions: input.restrictions,
+            sourceDescription: input.sourceDescription,
+            imageType: input.imageType,
+            ratio: input.ratio,
+            resolutionLabel: input.resolutionLabel,
+            customPrompt: input.copy.optimizedPrompt,
+            customNegativePrompt: input.customNegativePrompt,
+          })
+      : buildImagePrompt(input);
+
+  const withPromptContext = (error: unknown, providerDebug?: ProviderDebugInfo | null) => {
+    const wrapped = error instanceof Error ? error : new Error(String(error));
+    const enriched = wrapped as Error & { promptText?: string; providerDebug?: ProviderDebugInfo | null };
+    enriched.promptText = promptText;
+    enriched.providerDebug = providerDebug ?? null;
+    return enriched;
+  };
+
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model: input.imageModel,
+      contents: [
+        ...input.sourceImages.map((image) => ({
+          inlineData: {
+            mimeType: image.mimeType,
+            data: image.buffer.toString("base64"),
+          },
+        })),
+        { text: promptText },
+      ],
+      config: {
+        responseModalities: ["TEXT", "IMAGE"],
+        imageConfig,
+        temperature: 0.7,
+      },
+    });
+  } catch (error) {
+    throw withPromptContext(error);
+  }
 
   const parts = response.candidates?.[0]?.content?.parts ?? [];
   const imagePart = parts.find((part) => "inlineData" in part && part.inlineData?.data);
@@ -329,9 +799,21 @@ export async function generateEditedImage(input: {
     const imageUrl = extractImageUrlFromText(textContent);
 
     if (imageUrl) {
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok) {
-        throw new Error(textContent || `Gemini returned an image URL, but the file download failed: ${imageResponse.status}`);
+      let imageResponse: Response;
+      try {
+        imageResponse = await fetchImageWithRetries(imageUrl, 3);
+      } catch (error) {
+        const failureReason = error instanceof Error ? error.message : String(error);
+        throw withPromptContext(
+          new Error(`Provider returned an image URL, but downloading it failed: ${failureReason}`),
+          {
+            retrievalMethod: "url",
+            imageUrl,
+            rawText: textContent || "",
+            failureStage: "provider-image-download",
+            failureReason,
+          },
+        );
       }
 
       const mimeType = imageResponse.headers.get("content-type") || mimeTypeFromUrl(imageUrl);
@@ -341,15 +823,35 @@ export async function generateEditedImage(input: {
         mimeType,
         buffer,
         notes: textContent,
+        promptText,
+        providerDebug: {
+          retrievalMethod: "url",
+          imageUrl,
+          rawText: textContent || "",
+        } satisfies ProviderDebugInfo,
       };
     }
 
-    throw new Error(textContent || "Gemini did not return an image.");
+    throw withPromptContext(new Error(textContent || "Gemini did not return an image."), {
+      retrievalMethod: "inline",
+      rawText: textContent || "",
+      failureStage: "response",
+      failureReason: textContent || "Gemini did not return an image.",
+    });
   }
 
   return {
     mimeType: imagePart.inlineData.mimeType || "image/png",
     buffer: Buffer.from(imagePart.inlineData.data || "", "base64"),
     notes: textContent,
+    promptText,
+    providerDebug: {
+      retrievalMethod: "inline",
+      rawText: textContent || "",
+    } satisfies ProviderDebugInfo,
   };
+}
+
+export function buildRemakeCopyBundle(copy: ReferencePosterCopy): GeneratedCopyBundle {
+  return toGeneratedCopyBundleFromRemakePoster(copy);
 }

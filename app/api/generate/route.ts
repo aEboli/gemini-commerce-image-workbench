@@ -21,9 +21,10 @@ export async function POST(request: Request) {
   const formData = await request.formData();
   const payloadRaw = formData.get("payload");
   const files = formData.getAll("files").filter((file): file is File => file instanceof File);
+  const referenceFiles = formData.getAll("referenceFiles").filter((file): file is File => file instanceof File);
 
-  if (!payloadRaw || typeof payloadRaw !== "string" || !files.length) {
-    return NextResponse.json({ error: "Missing payload or files." }, { status: 400 });
+  if (!payloadRaw || typeof payloadRaw !== "string") {
+    return NextResponse.json({ error: "Missing payload." }, { status: 400 });
   }
 
   const payload = JSON.parse(payloadRaw) as unknown;
@@ -31,11 +32,57 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid payload." }, { status: 400 });
   }
 
-  if (!payload.productName || !payload.selectedTypes?.length || !payload.selectedRatios?.length || !payload.selectedResolutions?.length) {
+  const effectivePayload =
+    payload.creationMode === "reference-remix"
+      ? {
+          ...payload,
+          country: payload.uiLanguage === "zh" ? "CN" : payload.country || "US",
+          language: payload.uiLanguage === "zh" ? "zh-CN" : payload.language || "en-US",
+          platform: payload.uiLanguage === "zh" ? "tmall" : payload.platform || "amazon",
+          selectedTypes: ["scene"],
+          selectedResolutions:
+            payload.selectedResolutions?.filter((value) => value !== "512px").length
+              ? payload.selectedResolutions.filter((value) => value !== "512px")
+              : ["4K"],
+          selectedTemplateOverrides: {},
+          includeCopyLayout: false,
+          preserveReferenceText: payload.preserveReferenceText ?? true,
+        }
+      : payload.creationMode === "prompt"
+        ? {
+            ...payload,
+            selectedTypes: ["scene"],
+          }
+      : payload;
+
+  if (
+    (effectivePayload.creationMode !== "prompt" && !effectivePayload.productName) ||
+    !effectivePayload.selectedTypes?.length ||
+    !effectivePayload.selectedRatios?.length ||
+    !effectivePayload.selectedResolutions?.length
+  ) {
     return NextResponse.json({ error: "Please complete the required fields." }, { status: 400 });
   }
 
-  const totalVariants = files.length * payload.selectedTypes.length * payload.selectedRatios.length * payload.selectedResolutions.length * payload.variantsPerType;
+  if (effectivePayload.creationMode === "prompt" && !effectivePayload.customPrompt?.trim()) {
+    return NextResponse.json({ error: "Prompt mode requires a text prompt." }, { status: 400 });
+  }
+
+  if (effectivePayload.creationMode !== "prompt" && !files.length) {
+    return NextResponse.json({ error: "Missing files." }, { status: 400 });
+  }
+
+  if (effectivePayload.creationMode === "reference-remix" && !referenceFiles.length) {
+    return NextResponse.json({ error: "Reference remix mode requires at least one reference image." }, { status: 400 });
+  }
+
+  const sourceCount = effectivePayload.creationMode === "prompt" ? Math.max(files.length, 1) : files.length;
+  const totalVariants =
+    sourceCount *
+    effectivePayload.selectedTypes.length *
+    effectivePayload.selectedRatios.length *
+    effectivePayload.selectedResolutions.length *
+    effectivePayload.variantsPerType;
   if (totalVariants > 96) {
     return NextResponse.json({ error: "This batch is too large. Keep it under 96 generated variants per job." }, { status: 400 });
   }
@@ -53,16 +100,28 @@ export async function POST(request: Request) {
       });
     }),
   );
+  const referenceAssets = await Promise.all(
+    referenceFiles.map(async (file) => {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      return writeFileAsset({
+        jobId,
+        kind: "reference",
+        originalName: file.name,
+        mimeType: file.type || "image/png",
+        buffer,
+      });
+    }),
+  );
 
-  const createInput = buildCreateJobInput(sourceAssets, payload, jobId);
+  const createInput = buildCreateJobInput(sourceAssets, effectivePayload, jobId, referenceAssets);
   const job = createJob(createInput);
   const temporaryProvider: ProviderOverride | undefined =
-    payload.temporaryProvider &&
-    (payload.temporaryProvider.apiKey ||
-      payload.temporaryProvider.apiBaseUrl ||
-      payload.temporaryProvider.apiVersion ||
-      payload.temporaryProvider.apiHeaders)
-      ? payload.temporaryProvider
+    effectivePayload.temporaryProvider &&
+    (effectivePayload.temporaryProvider.apiKey ||
+      effectivePayload.temporaryProvider.apiBaseUrl ||
+      effectivePayload.temporaryProvider.apiVersion ||
+      effectivePayload.temporaryProvider.apiHeaders)
+      ? effectivePayload.temporaryProvider
       : undefined;
   enqueueJob(job.id, temporaryProvider);
 

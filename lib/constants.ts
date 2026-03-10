@@ -44,6 +44,22 @@ export function getDefaultLanguageForCountry(country: string): string | null {
   return DEFAULT_LANGUAGE_BY_COUNTRY[country] ?? null;
 }
 
+export const DEFAULT_COUNTRY_BY_LANGUAGE: Record<string, string> = {
+  "zh-CN": "CN",
+  "en-US": "US",
+  "en-GB": "GB",
+  "de-DE": "DE",
+  "fr-FR": "FR",
+  "ja-JP": "JP",
+  "ko-KR": "KR",
+  "es-ES": "US",
+  "pt-BR": "US",
+};
+
+export function getDefaultCountryForLanguage(language: string): string | null {
+  return DEFAULT_COUNTRY_BY_LANGUAGE[language] ?? null;
+}
+
 export const PLATFORMS: SelectOption[] = [
   { value: "amazon", label: { zh: "Amazon", en: "Amazon" } },
   { value: "tiktok-shop", label: { zh: "TikTok Shop", en: "TikTok Shop" } },

@@ -28,6 +28,7 @@ if (-not $isccPath) {
 
 $packageJson = Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json
 $appVersion = $packageJson.version
+$legacySetupPath = Join-Path $OutputRoot ("IMAGE-STUDIO-WINDOWS-$appVersion.exe")
 $appName = "Commerce Image Studio$displayTag"
 $publisherName = $appName
 $defaultDirName = if ($appDirSuffix) { "{localappdata}\CommerceImageStudio$appDirSuffix" } else { '{localappdata}\CommerceImageStudio' }
@@ -156,3 +157,10 @@ if (-not (Test-Path $setupPath)) {
 }
 
 Write-Host "Inno Setup installer created at: $setupPath" -ForegroundColor Green
+
+if (Test-Path $legacySetupPath) {
+  Remove-Item -Path $legacySetupPath -Force
+}
+
+Copy-Item -Path $setupPath -Destination $legacySetupPath -Force
+Write-Host "Versioned installer created at: $legacySetupPath" -ForegroundColor Green

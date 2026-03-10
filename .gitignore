@@ -4,7 +4,8 @@ data
 dist
 .runtime
 .codex
-构建V2单文件安装器.bat
+鏋勫缓V2鍗曟枃浠跺畨瑁呭櫒.bat
+.playwright-cli
 *.log
 coverage
 output

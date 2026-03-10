@@ -1,9 +1,21 @@
-import { generateCopyBundle, generateEditedImage, normalizeProviderError, translateCreativeInputs } from "@/lib/gemini";
+import {
+  analyzeReferenceLayout,
+  optimizeUserImagePrompt,
+  buildRemakeCopyBundle,
+  generateCopyBundle,
+  generateEditedImage,
+  generateRemakePosterCopy,
+  normalizeProviderError,
+  translateUserPromptInputs,
+  translateCreativeInputs,
+} from "@/lib/gemini";
+import { syncGeneratedImageToFeishu } from "@/lib/feishu";
 import { createPosterSvg } from "@/lib/poster";
 import {
   getAssetById,
   getBrandByName,
   getJobById,
+  getJobDetails,
   getSettings,
   getTemplateById,
   insertAsset,
@@ -13,10 +25,55 @@ import {
   updateJobItemProcessing,
   updateJobItemResult,
   updateJobLocalizedInputs,
+  updateJobReferenceArtifacts,
   updateJobStatus,
 } from "@/lib/db";
 import { readAssetBuffer, writeFileAsset } from "@/lib/storage";
-import type { AssetRecord, ProviderOverride } from "@/lib/types";
+import type { AssetRecord, ProviderDebugInfo, ProviderOverride } from "@/lib/types";
+import { buildPromptModeCopyBundle } from "@/lib/templates";
+
+function ratioDelta(actualWidth: number, actualHeight: number, requestedWidth: number, requestedHeight: number) {
+  const actual = actualWidth / actualHeight;
+  const requested = requestedWidth / requestedHeight;
+  return Math.abs(actual - requested);
+}
+
+function buildDimensionWarning(input: {
+  requestedRatio: string;
+  requestedResolutionLabel: string;
+  requestedWidth: number;
+  requestedHeight: number;
+  actualWidth: number | null;
+  actualHeight: number | null;
+}) {
+  if (!input.actualWidth || !input.actualHeight) {
+    return null;
+  }
+
+  const sizeMismatch = input.actualWidth !== input.requestedWidth || input.actualHeight !== input.requestedHeight;
+  const aspectMismatch = ratioDelta(input.actualWidth, input.actualHeight, input.requestedWidth, input.requestedHeight) > 0.01;
+
+  if (!sizeMismatch && !aspectMismatch) {
+    return null;
+  }
+
+  return `Requested ${input.requestedRatio} / ${input.requestedResolutionLabel} (${input.requestedWidth}×${input.requestedHeight}), but provider returned ${input.actualWidth}×${input.actualHeight}.`;
+}
+
+function summarizePartialFailure(
+  totalCount: number,
+  successCount: number,
+  failedDebugs: Array<ProviderDebugInfo | null>,
+) {
+  const failureCount = totalCount - successCount;
+  const downloadFailures = failedDebugs.filter((debug) => debug?.failureStage === "provider-image-download").length;
+
+  if (downloadFailures > 0) {
+    return `${totalCount} variants requested: ${successCount} succeeded, ${failureCount} failed. ${downloadFailures} failed while downloading provider-returned image URLs.`;
+  }
+
+  return `${totalCount} variants requested: ${successCount} succeeded, ${failureCount} failed.`;
+}
 
 function extensionForMimeType(mimeType: string) {
   switch (mimeType) {
@@ -38,6 +95,8 @@ export async function processJob(jobId: string, providerOverride?: ProviderOverr
   if (!job) {
     throw new Error(`Job ${jobId} not found.`);
   }
+  const jobDetails = getJobDetails(jobId);
+  const referenceAssets = jobDetails?.referenceAssets ?? [];
 
   const settings = getSettings();
   const apiKey = providerOverride?.apiKey || settings.defaultApiKey;
@@ -50,29 +109,58 @@ export async function processJob(jobId: string, providerOverride?: ProviderOverr
     return;
   }
 
+  if (job.creationMode === "reference-remix" && referenceAssets.length === 0) {
+    updateJobStatus(jobId, "failed", "Reference remix mode requires at least one reference image.");
+    return;
+  }
+
   updateJobStatus(jobId, "processing");
   const items = listJobItems(jobId);
   let successCount = 0;
   let failureCount = 0;
+  let firstFailureMessage: string | null = null;
+  const failureDebugs: Array<ProviderDebugInfo | null> = [];
 
-  const localizedInputs = await translateCreativeInputs({
-    apiKey,
-    textModel: settings.defaultTextModel,
-    apiBaseUrl,
-    apiVersion,
-    apiHeaders,
-    country: job.country,
-    language: job.language,
-    platform: job.platform,
-    category: job.category,
-    brandName: job.brandName,
-    sku: job.sku,
-    productName: job.productName,
-    sellingPoints: job.sellingPoints,
-    restrictions: job.restrictions,
-    sourceDescription: job.sourceDescription,
-  }).catch(() => null);
+  const localizedInputs =
+    job.creationMode === "prompt"
+      ? null
+      : await translateCreativeInputs({
+          apiKey,
+          textModel: settings.defaultTextModel,
+          apiBaseUrl,
+          apiVersion,
+          apiHeaders,
+          country: job.country,
+          language: job.language,
+          platform: job.platform,
+          category: job.category,
+          brandName: job.brandName,
+          sku: job.sku,
+          productName: job.productName,
+          sellingPoints: job.sellingPoints,
+          restrictions: job.restrictions,
+          sourceDescription: job.sourceDescription,
+        }).catch(() => null);
   updateJobLocalizedInputs(jobId, localizedInputs);
+
+  const translatedPromptInputs =
+    job.creationMode === "prompt"
+      ? await translateUserPromptInputs({
+          apiKey,
+          textModel: settings.defaultTextModel,
+          apiBaseUrl,
+          apiVersion,
+          apiHeaders,
+          country: job.country,
+          language: job.language,
+          platform: job.platform,
+          customPrompt: job.customPrompt,
+          customNegativePrompt: job.customNegativePrompt,
+        }).catch(() => ({
+          customPrompt: job.customPrompt,
+          customNegativePrompt: job.customNegativePrompt,
+        }))
+      : null;
 
   const effectiveInputs = {
     productName: localizedInputs?.productName || job.productName,
@@ -80,56 +168,185 @@ export async function processJob(jobId: string, providerOverride?: ProviderOverr
     restrictions: localizedInputs?.restrictions || job.restrictions,
     sourceDescription: localizedInputs?.sourceDescription || job.sourceDescription,
   };
+  const brandProfile = job.brandName ? getBrandByName(job.brandName) : null;
+  let referenceLayoutAnalysis = job.referenceLayoutAnalysis;
+  let referencePosterCopy = job.referencePosterCopy;
+  const referenceLayoutPromptHints = job.referenceLayoutOverride;
+  const referencePosterCopyPromptHints = job.referencePosterCopyOverride;
 
-  for (const item of items) {
-    try {
-      updateJobItemProcessing(item.id);
-      const sourceAsset = getAssetById(item.sourceAssetId);
-      if (!sourceAsset) {
-        throw new Error("Source asset not found.");
+  if (job.creationMode === "reference-remix") {
+    const primaryReferenceAsset = referenceAssets[0];
+    if (!primaryReferenceAsset) {
+      updateJobStatus(jobId, "failed", "Reference remix mode requires at least one reference image.");
+      return;
+    }
+
+    if (!referenceLayoutAnalysis) {
+      try {
+        const referenceBuffer = await readAssetBuffer(primaryReferenceAsset);
+        referenceLayoutAnalysis = await analyzeReferenceLayout({
+          apiKey,
+          textModel: settings.defaultTextModel,
+          apiBaseUrl,
+          apiVersion,
+          apiHeaders,
+          uiLanguage: job.uiLanguage,
+          referenceImage: {
+            mimeType: primaryReferenceAsset.mimeType,
+            buffer: referenceBuffer,
+          },
+        });
+      } catch {
+        referenceLayoutAnalysis = null;
       }
+    }
 
-      const sourceBuffer = await readAssetBuffer(sourceAsset);
-      const brandProfile = job.brandName ? getBrandByName(job.brandName) : null;
-      const overrideTemplateId = job.selectedTemplateOverrides[item.imageType];
-      const matchedTemplate =
-        (overrideTemplateId ? getTemplateById(overrideTemplateId) : null) ??
-        resolveTemplate({
+    if (!job.preserveReferenceText && !referencePosterCopy && referenceLayoutAnalysis) {
+      try {
+        referencePosterCopy = await generateRemakePosterCopy({
+          apiKey,
+          textModel: settings.defaultTextModel,
+          apiBaseUrl,
+          apiVersion,
+          apiHeaders,
           country: job.country,
           language: job.language,
           platform: job.platform,
           category: job.category,
-          imageType: item.imageType,
+          productName: effectiveInputs.productName,
+          brandName: job.brandName,
+          sellingPoints: effectiveInputs.sellingPoints,
+          restrictions: effectiveInputs.restrictions,
+          sourceDescription: effectiveInputs.sourceDescription,
+          referenceLayout: referenceLayoutAnalysis,
         });
+      } catch {
+        referencePosterCopy = null;
+      }
+    }
 
-      const copy = await generateCopyBundle({
-        apiKey,
-        textModel: settings.defaultTextModel,
-        apiBaseUrl,
-        apiVersion,
-        apiHeaders,
-        country: job.country,
-        language: job.language,
-        platform: job.platform,
-        category: job.category,
-        brandName: job.brandName,
-        productName: effectiveInputs.productName,
-        sellingPoints: effectiveInputs.sellingPoints,
-        restrictions: effectiveInputs.restrictions,
-        sourceDescription: effectiveInputs.sourceDescription,
-        brandProfile,
-        imageType: item.imageType,
-        ratio: item.ratio,
-        resolutionLabel: item.resolutionLabel,
-        template: matchedTemplate,
-      });
+    updateJobReferenceArtifacts(jobId, referenceLayoutAnalysis, referencePosterCopy);
+  }
 
-      const generated = await generateEditedImage({
+  for (const item of items) {
+    try {
+      updateJobItemProcessing(item.id);
+      const sourceAsset = item.sourceAssetId ? getAssetById(item.sourceAssetId) : null;
+      if (!sourceAsset && job.creationMode !== "prompt") {
+        throw new Error("Source asset not found.");
+      }
+
+      const sourceImages = sourceAsset
+        ? [
+            {
+              mimeType: sourceAsset.mimeType,
+              buffer: await readAssetBuffer(sourceAsset),
+            },
+          ]
+        : [];
+      const referenceImages = await Promise.all(
+        referenceAssets.map(async (asset) => ({
+          mimeType: asset.mimeType,
+          buffer: await readAssetBuffer(asset),
+        })),
+      );
+      const overrideTemplateId = job.selectedTemplateOverrides[item.imageType];
+      const matchedTemplate =
+        job.creationMode === "reference-remix" || job.creationMode === "prompt"
+          ? null
+          : (overrideTemplateId ? getTemplateById(overrideTemplateId) : null) ??
+            resolveTemplate({
+              country: job.country,
+              language: job.language,
+              platform: job.platform,
+              category: job.category,
+              imageType: item.imageType,
+            });
+
+      const copy =
+        job.creationMode === "reference-remix"
+          ? buildRemakeCopyBundle(
+              referencePosterCopyPromptHints ??
+                referencePosterCopy ?? {
+                  summary: effectiveInputs.sourceDescription || effectiveInputs.sellingPoints || effectiveInputs.productName,
+                  topBanner: "",
+                  headline: effectiveInputs.productName,
+                  subheadline: "",
+                  bottomBanner: "",
+                  callouts: [],
+                },
+            )
+          : job.creationMode === "prompt"
+            ? buildPromptModeCopyBundle({
+                productName: effectiveInputs.productName,
+                customPrompt: job.customPrompt,
+              })
+          : await generateCopyBundle({
+              apiKey,
+              textModel: settings.defaultTextModel,
+              apiBaseUrl,
+              apiVersion,
+              apiHeaders,
+              country: job.country,
+              language: job.language,
+              platform: job.platform,
+              category: job.category,
+              brandName: job.brandName,
+              productName: effectiveInputs.productName,
+              sellingPoints: effectiveInputs.sellingPoints,
+              restrictions: effectiveInputs.restrictions,
+              sourceDescription: effectiveInputs.sourceDescription,
+              brandProfile,
+              imageType: item.imageType,
+              ratio: item.ratio,
+              resolutionLabel: item.resolutionLabel,
+              template: matchedTemplate,
+            });
+
+      const promptModePrompt =
+        job.creationMode === "prompt"
+          ? job.autoOptimizePrompt
+            ? await optimizeUserImagePrompt({
+                apiKey,
+                textModel: settings.defaultTextModel,
+                apiBaseUrl,
+                apiVersion,
+                apiHeaders,
+                country: job.country,
+                language: job.language,
+                platform: job.platform,
+                category: job.category,
+                productName: effectiveInputs.productName,
+                brandName: job.brandName,
+                sellingPoints: effectiveInputs.sellingPoints,
+                restrictions: effectiveInputs.restrictions,
+                sourceDescription: effectiveInputs.sourceDescription,
+                imageType: item.imageType,
+                ratio: item.ratio,
+                resolutionLabel: item.resolutionLabel,
+                customPrompt: translatedPromptInputs?.customPrompt || job.customPrompt,
+                customNegativePrompt: translatedPromptInputs?.customNegativePrompt || job.customNegativePrompt,
+              })
+            : translatedPromptInputs?.customPrompt || job.customPrompt
+          : null;
+
+      const imageInput = {
         apiKey,
         imageModel: settings.defaultImageModel,
         apiBaseUrl,
         apiVersion,
         apiHeaders,
+        creationMode: job.creationMode,
+        referenceStrength: job.referenceStrength,
+        preserveReferenceText: job.preserveReferenceText,
+        customPromptText:
+          promptModePrompt ?? (job.creationMode === "prompt" ? translatedPromptInputs?.customPrompt || job.customPrompt : undefined),
+        customNegativePrompt:
+          job.creationMode === "prompt"
+            ? translatedPromptInputs?.customNegativePrompt || job.customNegativePrompt
+            : undefined,
+        referenceExtraPrompt: job.referenceExtraPrompt,
+        referenceNegativePrompt: job.referenceNegativePrompt,
         country: job.country,
         language: job.language,
         platform: job.platform,
@@ -144,9 +361,51 @@ export async function processJob(jobId: string, providerOverride?: ProviderOverr
         ratio: item.ratio,
         resolutionLabel: item.resolutionLabel,
         copy,
+        referenceLayout: referenceLayoutPromptHints,
+        referencePosterCopy: referencePosterCopyPromptHints,
         template: matchedTemplate,
-        sourceImages: [{ mimeType: sourceAsset.mimeType, buffer: sourceBuffer }],
-      });
+        sourceImages: [...sourceImages, ...referenceImages],
+      };
+
+      let generated;
+      if (job.creationMode === "reference-remix") {
+        try {
+          generated = await generateEditedImage({
+            ...imageInput,
+            remakePromptVariant: "strict",
+          });
+        } catch (strictError) {
+          const strictMessage = normalizeProviderError(strictError);
+          const strictPromptText =
+            strictError && typeof strictError === "object" && "promptText" in strictError
+              ? String((strictError as { promptText?: string }).promptText ?? "")
+              : "";
+          try {
+            generated = await generateEditedImage({
+              ...imageInput,
+              remakePromptVariant: "fallback",
+            });
+          } catch (fallbackError) {
+            const fallbackMessage = normalizeProviderError(fallbackError);
+            const fallbackPromptText =
+              fallbackError && typeof fallbackError === "object" && "promptText" in fallbackError
+                ? String((fallbackError as { promptText?: string }).promptText ?? "")
+                : "";
+            const combinedError = new Error(
+              `Strict remake failed: ${strictMessage}. Fallback remake failed: ${fallbackMessage}.`,
+            ) as Error & { promptText?: string };
+            combinedError.promptText = [
+              strictPromptText ? `=== Strict remake prompt ===\n${strictPromptText}` : "",
+              fallbackPromptText ? `=== Fallback remake prompt ===\n${fallbackPromptText}` : "",
+            ]
+              .filter(Boolean)
+              .join("\n\n");
+            throw combinedError;
+          }
+        }
+      } else {
+        generated = await generateEditedImage(imageInput);
+      }
 
       const generatedAsset = await writeFileAsset({
         jobId,
@@ -159,6 +418,15 @@ export async function processJob(jobId: string, providerOverride?: ProviderOverr
         height: item.height,
       });
       insertAsset(generatedAsset);
+      const dimensionWarning = buildDimensionWarning({
+        requestedRatio: item.ratio,
+        requestedResolutionLabel: item.resolutionLabel,
+        requestedWidth: item.width,
+        requestedHeight: item.height,
+        actualWidth: generatedAsset.width,
+        actualHeight: generatedAsset.height,
+      });
+      let syncWarning: string | null = null;
 
       let layoutAsset: AssetRecord | null = null;
       if (job.includeCopyLayout) {
@@ -185,22 +453,74 @@ export async function processJob(jobId: string, providerOverride?: ProviderOverr
         insertAsset(layoutAsset);
       }
 
+      try {
+        await syncGeneratedImageToFeishu({
+          settings,
+          asset: generatedAsset,
+          assetBuffer: generated.buffer,
+          job,
+          item,
+          promptText: generated.promptText || copy.optimizedPrompt,
+          negativePrompt:
+            job.creationMode === "prompt"
+              ? translatedPromptInputs?.customNegativePrompt || job.customNegativePrompt
+              : null,
+        });
+      } catch (syncError) {
+        syncWarning = `Feishu sync failed: ${syncError instanceof Error ? syncError.message : "Unknown error."}`;
+      }
+
+      const warningMessage = [dimensionWarning, syncWarning].filter(Boolean).join(" | ") || null;
+
       updateJobItemResult({
         itemId: item.id,
-        promptText: copy.optimizedPrompt,
+        promptText: generated.promptText || copy.optimizedPrompt,
+        negativePrompt:
+          job.creationMode === "prompt"
+            ? translatedPromptInputs?.customNegativePrompt || job.customNegativePrompt
+            : null,
         copy,
         generatedAssetId: generatedAsset.id,
         layoutAssetId: layoutAsset?.id ?? null,
+        warningMessage,
+        providerDebug: {
+          ...(generated.providerDebug ?? {}),
+          requestedWidth: item.width,
+          requestedHeight: item.height,
+          actualWidth: generatedAsset.width ?? undefined,
+          actualHeight: generatedAsset.height ?? undefined,
+        },
       });
       successCount += 1;
     } catch (error) {
       failureCount += 1;
-      updateJobItemFailure(item.id, normalizeProviderError(error));
+      const normalizedError = normalizeProviderError(error);
+      const promptText =
+        error && typeof error === "object" && "promptText" in error ? String((error as { promptText?: string }).promptText ?? "") : null;
+      const providerDebug =
+        error && typeof error === "object" && "providerDebug" in error
+          ? ((error as { providerDebug?: ProviderDebugInfo | null }).providerDebug ?? null)
+          : null;
+      const failureMessage =
+        job.creationMode === "reference-remix" ? `Poster remake generation failed: ${normalizedError}` : normalizedError;
+      if (!firstFailureMessage) {
+        firstFailureMessage = failureMessage;
+      }
+      failureDebugs.push(providerDebug);
+      updateJobItemFailure(
+        item.id,
+        failureMessage,
+        promptText,
+        job.creationMode === "prompt"
+          ? translatedPromptInputs?.customNegativePrompt || job.customNegativePrompt
+          : null,
+        providerDebug,
+      );
     }
   }
 
   if (successCount > 0 && failureCount > 0) {
-    updateJobStatus(jobId, "partial", `${failureCount} variants failed.`);
+    updateJobStatus(jobId, "partial", summarizePartialFailure(items.length, successCount, failureDebugs));
     return;
   }
 
@@ -209,5 +529,5 @@ export async function processJob(jobId: string, providerOverride?: ProviderOverr
     return;
   }
 
-  updateJobStatus(jobId, "failed", "All variants failed to generate.");
+  updateJobStatus(jobId, "failed", firstFailureMessage ?? "All variants failed to generate.");
 }

@@ -6,6 +6,9 @@ export type JobItemStatus = "queued" | "processing" | "completed" | "failed";
 
 export type JobItemReviewStatus = "unreviewed" | "shortlisted" | "approved" | "rejected";
 
+export type CreationMode = "standard" | "reference-remix" | "prompt";
+export type ReferenceStrength = "reference" | "balanced" | "product";
+
 export type ImageType =
   | "scene"
   | "white-background"
@@ -30,6 +33,32 @@ export interface AppSettings {
   storageDir: string;
   maxConcurrency: number;
   defaultUiLanguage: UiLanguage;
+  feishuSyncEnabled: boolean;
+  feishuAppId: string;
+  feishuAppSecret: string;
+  feishuBitableAppToken: string;
+  feishuBitableTableId: string;
+  feishuUploadParentType: string;
+  feishuFieldMappingJson: string;
+}
+
+export interface FeishuFieldMapping {
+  title?: string;
+  image?: string;
+  prompt?: string;
+  negativePrompt?: string;
+  status?: string;
+  mode?: string;
+  platform?: string;
+  country?: string;
+  language?: string;
+  ratio?: string;
+  resolution?: string;
+  requestedSize?: string;
+  actualSize?: string;
+  jobId?: string;
+  itemId?: string;
+  createdAt?: string;
 }
 
 export interface ProviderOverride {
@@ -46,15 +75,77 @@ export interface LocalizedCreativeInputs {
   sourceDescription: string;
 }
 
+export interface ReferenceTextZone {
+  present: boolean;
+  placement: string;
+  style: string;
+  sourceText: string;
+}
+
+export interface ReferenceCalloutZone {
+  placement: string;
+  style: string;
+  sourceText: string;
+  iconHint: string;
+}
+
+export interface ReferenceLayoutAnalysis {
+  summary: string;
+  posterStyle: string;
+  backgroundType: string;
+  primaryProductPlacement: string;
+  packagingPresent: boolean;
+  packagingPlacement: string;
+  productPackagingRelationship: string;
+  supportingProps: string[];
+  palette: string[];
+  cameraAngle: string;
+  depthAndLighting: string;
+  topBanner: ReferenceTextZone;
+  headline: ReferenceTextZone;
+  subheadline: ReferenceTextZone;
+  bottomBanner: ReferenceTextZone;
+  callouts: ReferenceCalloutZone[];
+}
+
+export interface ReferencePosterCopy {
+  summary: string;
+  topBanner: string;
+  headline: string;
+  subheadline: string;
+  bottomBanner: string;
+  callouts: string[];
+}
+
+export interface ProviderDebugInfo {
+  retrievalMethod?: "inline" | "url";
+  imageUrl?: string;
+  rawText?: string;
+  failureStage?: "response" | "provider-image-download";
+  failureReason?: string;
+  requestedWidth?: number;
+  requestedHeight?: number;
+  actualWidth?: number;
+  actualHeight?: number;
+}
+
 export interface JobRecord {
   id: string;
   status: JobStatus;
+  creationMode: CreationMode;
+  referenceStrength: ReferenceStrength;
+  preserveReferenceText: boolean;
   productName: string;
   sku: string;
   category: string;
   brandName: string;
   sellingPoints: string;
   restrictions: string;
+  customPrompt: string;
+  customNegativePrompt: string;
+  autoOptimizePrompt: boolean;
+  referenceExtraPrompt: string;
+  referenceNegativePrompt: string;
   country: string;
   language: string;
   platform: string;
@@ -72,6 +163,10 @@ export interface JobRecord {
   uiLanguage: UiLanguage;
   selectedTemplateOverrides: Record<string, string>;
   localizedInputs: LocalizedCreativeInputs | null;
+  referenceLayoutOverride: ReferenceLayoutAnalysis | null;
+  referencePosterCopyOverride: ReferencePosterCopy | null;
+  referenceLayoutAnalysis: ReferenceLayoutAnalysis | null;
+  referencePosterCopy: ReferencePosterCopy | null;
 }
 
 export interface JobItemRecord {
@@ -95,13 +190,15 @@ export interface JobItemRecord {
   createdAt: string;
   updatedAt: string;
   errorMessage: string | null;
+  warningMessage: string | null;
+  providerDebug: ProviderDebugInfo | null;
 }
 
 export interface AssetRecord {
   id: string;
   jobId: string;
   jobItemId: string | null;
-  kind: "source" | "generated" | "layout";
+  kind: "source" | "reference" | "generated" | "layout";
   originalName: string;
   mimeType: string;
   filePath: string;
@@ -185,6 +282,7 @@ export interface GeneratedCopyBundle {
 export interface JobDetails {
   job: JobRecord;
   sourceAssets: AssetRecord[];
+  referenceAssets: AssetRecord[];
   items: Array<
     JobItemRecord & {
       generatedAsset: AssetRecord | null;

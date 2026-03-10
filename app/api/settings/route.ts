@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSettings, updateSettings } from "@/lib/db";
+import { parseFeishuFieldMapping } from "@/lib/feishu";
 import { testProviderConnection } from "@/lib/gemini";
 import type { AppSettings } from "@/lib/types";
 
@@ -17,6 +18,10 @@ function validateHeadersJson(rawHeaders?: string) {
   }
 }
 
+function validateFeishuFieldMappingJson(rawMapping?: string) {
+  parseFeishuFieldMapping(rawMapping);
+}
+
 export async function GET() {
   return NextResponse.json(getSettings());
 }
@@ -26,6 +31,7 @@ export async function PUT(request: Request) {
 
   try {
     validateHeadersJson(body.defaultApiHeaders);
+    validateFeishuFieldMappingJson(body.feishuFieldMappingJson);
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Invalid headers JSON." }, { status: 400 });
   }

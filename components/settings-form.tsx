@@ -7,59 +7,140 @@ import type { AppSettings, UiLanguage } from "@/lib/types";
 export function SettingsForm({ initialSettings, language }: { initialSettings: AppSettings; language: UiLanguage }) {
   const [formState, setFormState] = useState(initialSettings);
   const [message, setMessage] = useState("");
-  const [testMessage, setTestMessage] = useState("");
+  const [providerTestMessage, setProviderTestMessage] = useState("");
+  const [feishuTestMessage, setFeishuTestMessage] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [isTesting, startTestTransition] = useTransition();
+  const [isTestingProvider, startProviderTestTransition] = useTransition();
+  const [isTestingFeishu, startFeishuTestTransition] = useTransition();
 
   const text = useMemo(
     () =>
       language === "zh"
         ? {
-            defaultApiKey: "默认 API Key",
-            defaultTextModel: "默认文本模型",
-            defaultImageModel: "默认图像模型",
-            defaultApiBaseUrl: "Gemini Base URL / 中转站地址",
-            defaultApiVersion: "API 版本",
-            defaultApiHeaders: "自定义请求头 JSON（可选）",
-            storageDir: "素材存储目录",
-            maxConcurrency: "并发任务数",
-            save: "保存设置",
-            saving: "保存中…",
-            saved: "设置已保存",
-            test: "测试连接",
-            testing: "测试中…",
-            testOk: "连接成功",
-            testFailed: "连接失败",
-            saveFailed: "保存失败。",
-            unknownError: "未知错误",
-            baseUrlHint: "留空表示使用 Google 官方 Gemini 接口；如果使用中转站，请填写对方提供的 base_url。",
-            headersHint: "示例：{\"Authorization\":\"Bearer your-key\"}。如果中转站不需要额外请求头，可以留空。",
-            versionHint: "大多数 Gemini 兼容中转站使用 v1beta。",
+            sections: {
+              gemini: "Gemini / 中转设置",
+              feishu: "飞书多维表格同步",
+            },
+            labels: {
+              defaultApiKey: "默认 API Key",
+              defaultTextModel: "默认文本模型",
+              defaultImageModel: "默认图像模型",
+              defaultApiBaseUrl: "Gemini Base URL / 中转地址",
+              defaultApiVersion: "API 版本",
+              defaultApiHeaders: "自定义请求头 JSON（可选）",
+              storageDir: "素材存储目录",
+              maxConcurrency: "并发任务数",
+              feishuSyncEnabled: "启用飞书多维表格自动同步",
+              feishuAppId: "飞书 App ID",
+              feishuAppSecret: "飞书 App Secret",
+              feishuBitableAppToken: "多维表格 App Token",
+              feishuBitableTableId: "多维表格 Table ID",
+              feishuUploadParentType: "飞书上传 parent_type",
+              feishuFieldMappingJson: "多维表格字段映射 JSON",
+            },
+            actions: {
+              save: "保存设置",
+              saving: "保存中…",
+              saved: "设置已保存",
+              saveFailed: "保存失败。",
+              testProvider: "测试 Gemini / 中转",
+              testingProvider: "测试中…",
+              providerOk: "Gemini / 中转连接成功",
+              providerFailed: "Gemini / 中转连接失败",
+              testFeishu: "测试飞书连接",
+              testingFeishu: "测试中…",
+              feishuOk: "飞书连接成功",
+              feishuFailed: "飞书连接失败",
+              unknownError: "未知错误",
+            },
+            hints: {
+              baseUrl: "留空表示使用 Google 官方 Gemini API；如使用中转站，请填写对方提供的 base_url。",
+              headers: '示例：{"Authorization":"Bearer your-key"}。如不需要额外请求头，可留空。',
+              version: "大多数 Gemini 兼容中转使用 v1beta。",
+              feishuEnable: "开启后，生成成功的图片会自动创建飞书多维表格记录，并上传到图片字段。",
+              feishuToken: "可在飞书开放平台和多维表格链接中获取。",
+              feishuParentType: "默认使用 bitable_image。若你的应用要求不同，可在这里改。",
+              feishuMapping:
+                '只会写入你配置过的字段。示例：{"title":"标题","image":"生成图片","prompt":"提示词","platform":"平台"}',
+            },
           }
         : {
-            defaultApiKey: "Default API key",
-            defaultTextModel: "Default text model",
-            defaultImageModel: "Default image model",
-            defaultApiBaseUrl: "Gemini base URL / relay URL",
-            defaultApiVersion: "API version",
-            defaultApiHeaders: "Custom headers JSON (optional)",
-            storageDir: "Asset storage directory",
-            maxConcurrency: "Max concurrent jobs",
-            save: "Save settings",
-            saving: "Saving…",
-            saved: "Settings saved",
-            test: "Test connection",
-            testing: "Testing…",
-            testOk: "Connection succeeded",
-            testFailed: "Connection failed",
-            saveFailed: "Save failed.",
-            unknownError: "Unknown error",
-            baseUrlHint: "Leave blank for Google official Gemini API. For a relay, paste the provider's base_url here.",
-            headersHint: "Example: {\"Authorization\":\"Bearer your-key\"}. Leave empty if your relay does not require extra headers.",
-            versionHint: "Most Gemini-compatible relays use v1beta.",
+            sections: {
+              gemini: "Gemini / relay settings",
+              feishu: "Feishu Bitable sync",
+            },
+            labels: {
+              defaultApiKey: "Default API key",
+              defaultTextModel: "Default text model",
+              defaultImageModel: "Default image model",
+              defaultApiBaseUrl: "Gemini base URL / relay URL",
+              defaultApiVersion: "API version",
+              defaultApiHeaders: "Custom headers JSON (optional)",
+              storageDir: "Asset storage directory",
+              maxConcurrency: "Max concurrent jobs",
+              feishuSyncEnabled: "Enable automatic Feishu Bitable sync",
+              feishuAppId: "Feishu App ID",
+              feishuAppSecret: "Feishu App Secret",
+              feishuBitableAppToken: "Bitable app token",
+              feishuBitableTableId: "Bitable table ID",
+              feishuUploadParentType: "Feishu upload parent_type",
+              feishuFieldMappingJson: "Bitable field mapping JSON",
+            },
+            actions: {
+              save: "Save settings",
+              saving: "Saving…",
+              saved: "Settings saved",
+              saveFailed: "Save failed.",
+              testProvider: "Test Gemini / relay",
+              testingProvider: "Testing…",
+              providerOk: "Gemini / relay connection succeeded",
+              providerFailed: "Gemini / relay connection failed",
+              testFeishu: "Test Feishu connection",
+              testingFeishu: "Testing…",
+              feishuOk: "Feishu connection succeeded",
+              feishuFailed: "Feishu connection failed",
+              unknownError: "Unknown error",
+            },
+            hints: {
+              baseUrl: "Leave blank for the official Google Gemini API. For a relay, paste the provider's base_url here.",
+              headers: 'Example: {"Authorization":"Bearer your-key"}. Leave empty if your relay does not require extra headers.',
+              version: "Most Gemini-compatible relays use v1beta.",
+              feishuEnable: "When enabled, successful generated images will automatically create Feishu Bitable records and upload to the image field.",
+              feishuToken: "You can find these in the Feishu developer console and the Bitable URL.",
+              feishuParentType: "Defaults to bitable_image. Change it only if your Feishu app requires another upload parent type.",
+              feishuMapping:
+                'Only mapped fields will be written. Example: {"title":"Title","image":"Generated Image","prompt":"Prompt","platform":"Platform"}',
+            },
           },
     [language],
   );
+
+  function patchSettings(patch: Partial<AppSettings>) {
+    setFormState((current) => ({ ...current, ...patch }));
+  }
+
+  async function handleJsonRequest(
+    url: string,
+    onMessage: (message: string) => void,
+    okPrefix: string,
+    failedPrefix: string,
+  ) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(formState),
+    });
+
+    const body = (await response.json().catch(() => null)) as { error?: string; result?: string } | null;
+    if (!response.ok) {
+      onMessage(`${failedPrefix}: ${body?.error ?? text.actions.unknownError}`);
+      return;
+    }
+
+    onMessage(`${okPrefix}: ${body?.result ?? "OK"}`);
+  }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,112 +157,188 @@ export function SettingsForm({ initialSettings, language }: { initialSettings: A
 
       if (!response.ok) {
         const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        setMessage(body?.error ?? text.saveFailed);
+        setMessage(body?.error ?? text.actions.saveFailed);
         return;
       }
 
-      setMessage(text.saved);
+      setMessage(text.actions.saved);
     });
   }
 
-  function handleTest() {
-    setTestMessage("");
+  function handleProviderTest() {
+    setProviderTestMessage("");
+    startProviderTestTransition(async () => {
+      await handleJsonRequest(
+        "/api/settings/test",
+        setProviderTestMessage,
+        text.actions.providerOk,
+        text.actions.providerFailed,
+      );
+    });
+  }
 
-    startTestTransition(async () => {
-      const response = await fetch("/api/settings/test", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formState),
-      });
-
-      const body = (await response.json().catch(() => null)) as { error?: string; result?: string } | null;
-      if (!response.ok) {
-        setTestMessage(`${text.testFailed}: ${body?.error ?? text.unknownError}`);
-        return;
-      }
-
-      setTestMessage(`${text.testOk}: ${body?.result ?? "OK"}`);
+  function handleFeishuTest() {
+    setFeishuTestMessage("");
+    startFeishuTestTransition(async () => {
+      await handleJsonRequest(
+        "/api/settings/test-feishu",
+        setFeishuTestMessage,
+        text.actions.feishuOk,
+        text.actions.feishuFailed,
+      );
     });
   }
 
   return (
     <form className="panel form-panel settings-form-panel" onSubmit={handleSubmit}>
-      <label>
-        <span>{text.defaultApiKey}</span>
-        <input
-          type="password"
-          value={formState.defaultApiKey}
-          onChange={(event) => setFormState({ ...formState, defaultApiKey: event.target.value })}
-        />
-      </label>
-      <label>
-        <span>{text.defaultApiBaseUrl}</span>
-        <input
-          placeholder="https://your-relay-host.example"
-          value={formState.defaultApiBaseUrl}
-          onChange={(event) => setFormState({ ...formState, defaultApiBaseUrl: event.target.value })}
-        />
-        <small className="helper">{text.baseUrlHint}</small>
-      </label>
-      <label>
-        <span>{text.defaultApiVersion}</span>
-        <input
-          value={formState.defaultApiVersion}
-          onChange={(event) => setFormState({ ...formState, defaultApiVersion: event.target.value })}
-        />
-        <small className="helper">{text.versionHint}</small>
-      </label>
-      <label>
-        <span>{text.defaultApiHeaders}</span>
-        <textarea
-          rows={4}
-          placeholder='{"Authorization":"Bearer your-key"}'
-          value={formState.defaultApiHeaders}
-          onChange={(event) => setFormState({ ...formState, defaultApiHeaders: event.target.value })}
-        />
-        <small className="helper">{text.headersHint}</small>
-      </label>
-      <label>
-        <span>{text.defaultTextModel}</span>
-        <input
-          value={formState.defaultTextModel}
-          onChange={(event) => setFormState({ ...formState, defaultTextModel: event.target.value })}
-        />
-      </label>
-      <label>
-        <span>{text.defaultImageModel}</span>
-        <input
-          value={formState.defaultImageModel}
-          onChange={(event) => setFormState({ ...formState, defaultImageModel: event.target.value })}
-        />
-      </label>
-      <label>
-        <span>{text.storageDir}</span>
-        <input
-          value={formState.storageDir}
-          onChange={(event) => setFormState({ ...formState, storageDir: event.target.value })}
-        />
-      </label>
-      <label>
-        <span>{text.maxConcurrency}</span>
-        <input
-          min={1}
-          max={6}
-          type="number"
-          value={formState.maxConcurrency}
-          onChange={(event) => setFormState({ ...formState, maxConcurrency: Number(event.target.value) || 1 })}
-        />
-      </label>
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h3>{text.sections.gemini}</h3>
+        </div>
+        <label>
+          <span>{text.labels.defaultApiKey}</span>
+          <input
+            type="password"
+            value={formState.defaultApiKey}
+            onChange={(event) => patchSettings({ defaultApiKey: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>{text.labels.defaultApiBaseUrl}</span>
+          <input
+            placeholder="https://your-relay-host.example"
+            value={formState.defaultApiBaseUrl}
+            onChange={(event) => patchSettings({ defaultApiBaseUrl: event.target.value })}
+          />
+          <small className="helper">{text.hints.baseUrl}</small>
+        </label>
+        <label>
+          <span>{text.labels.defaultApiVersion}</span>
+          <input
+            value={formState.defaultApiVersion}
+            onChange={(event) => patchSettings({ defaultApiVersion: event.target.value })}
+          />
+          <small className="helper">{text.hints.version}</small>
+        </label>
+        <label>
+          <span>{text.labels.defaultApiHeaders}</span>
+          <textarea
+            rows={4}
+            placeholder='{"Authorization":"Bearer your-key"}'
+            value={formState.defaultApiHeaders}
+            onChange={(event) => patchSettings({ defaultApiHeaders: event.target.value })}
+          />
+          <small className="helper">{text.hints.headers}</small>
+        </label>
+        <label>
+          <span>{text.labels.defaultTextModel}</span>
+          <input
+            value={formState.defaultTextModel}
+            onChange={(event) => patchSettings({ defaultTextModel: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>{text.labels.defaultImageModel}</span>
+          <input
+            value={formState.defaultImageModel}
+            onChange={(event) => patchSettings({ defaultImageModel: event.target.value })}
+          />
+        </label>
+        <div className="button-row">
+          <button className="ghost-button" disabled={isTestingProvider} onClick={handleProviderTest} type="button">
+            {isTestingProvider ? text.actions.testingProvider : text.actions.testProvider}
+          </button>
+        </div>
+        {providerTestMessage ? <p className="helper">{providerTestMessage}</p> : null}
+      </div>
+
+      <div className="settings-section">
+        <div className="settings-section-header">
+          <h3>{text.sections.feishu}</h3>
+        </div>
+        <label className="settings-checkbox-row">
+          <input
+            checked={formState.feishuSyncEnabled}
+            onChange={(event) => patchSettings({ feishuSyncEnabled: event.target.checked })}
+            type="checkbox"
+          />
+          <span>{text.labels.feishuSyncEnabled}</span>
+        </label>
+        <small className="helper">{text.hints.feishuEnable}</small>
+        <label>
+          <span>{text.labels.feishuAppId}</span>
+          <input value={formState.feishuAppId} onChange={(event) => patchSettings({ feishuAppId: event.target.value })} />
+        </label>
+        <label>
+          <span>{text.labels.feishuAppSecret}</span>
+          <input
+            type="password"
+            value={formState.feishuAppSecret}
+            onChange={(event) => patchSettings({ feishuAppSecret: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>{text.labels.feishuBitableAppToken}</span>
+          <input
+            value={formState.feishuBitableAppToken}
+            onChange={(event) => patchSettings({ feishuBitableAppToken: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>{text.labels.feishuBitableTableId}</span>
+          <input
+            value={formState.feishuBitableTableId}
+            onChange={(event) => patchSettings({ feishuBitableTableId: event.target.value })}
+          />
+          <small className="helper">{text.hints.feishuToken}</small>
+        </label>
+        <label>
+          <span>{text.labels.feishuUploadParentType}</span>
+          <input
+            value={formState.feishuUploadParentType}
+            onChange={(event) => patchSettings({ feishuUploadParentType: event.target.value })}
+          />
+          <small className="helper">{text.hints.feishuParentType}</small>
+        </label>
+        <label>
+          <span>{text.labels.feishuFieldMappingJson}</span>
+          <textarea
+            rows={10}
+            value={formState.feishuFieldMappingJson}
+            onChange={(event) => patchSettings({ feishuFieldMappingJson: event.target.value })}
+          />
+          <small className="helper">{text.hints.feishuMapping}</small>
+        </label>
+        <div className="button-row">
+          <button className="ghost-button" disabled={isTestingFeishu} onClick={handleFeishuTest} type="button">
+            {isTestingFeishu ? text.actions.testingFeishu : text.actions.testFeishu}
+          </button>
+        </div>
+        {feishuTestMessage ? <p className="helper">{feishuTestMessage}</p> : null}
+      </div>
+
+      <div className="settings-section">
+        <label>
+          <span>{text.labels.storageDir}</span>
+          <input value={formState.storageDir} onChange={(event) => patchSettings({ storageDir: event.target.value })} />
+        </label>
+        <label>
+          <span>{text.labels.maxConcurrency}</span>
+          <input
+            min={1}
+            max={6}
+            type="number"
+            value={formState.maxConcurrency}
+            onChange={(event) => patchSettings({ maxConcurrency: Number(event.target.value) || 1 })}
+          />
+        </label>
+      </div>
+
       {message ? <p className="helper success-text">{message}</p> : null}
-      {testMessage ? <p className="helper">{testMessage}</p> : null}
+
       <div className="button-row">
-        <button className="ghost-button" disabled={isTesting} onClick={handleTest} type="button">
-          {isTesting ? text.testing : text.test}
-        </button>
         <button className="primary-button" disabled={isPending} type="submit">
-          {isPending ? text.saving : text.save}
+          {isPending ? text.actions.saving : text.actions.save}
         </button>
       </div>
     </form>

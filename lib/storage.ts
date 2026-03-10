@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { getSettings } from "@/lib/db";
 import type { AssetRecord } from "@/lib/types";
-import { createId, mimeToExtension, nowIso, sha256 } from "@/lib/utils";
+import { createId, detectImageDimensions, mimeToExtension, nowIso, sha256 } from "@/lib/utils";
 
 export async function ensureStorageDir() {
   const settings = getSettings();
@@ -29,6 +29,8 @@ export async function writeFileAsset(input: {
   await fs.mkdir(dir, { recursive: true });
   const filePath = path.join(dir, `${assetId}.${extension}`);
   await fs.writeFile(filePath, input.buffer);
+  const detectedDimensions =
+    input.mimeType === "image/svg+xml" ? null : detectImageDimensions(input.buffer, input.mimeType);
 
   return {
     id: assetId,
@@ -38,8 +40,8 @@ export async function writeFileAsset(input: {
     originalName: input.originalName,
     mimeType: input.mimeType,
     filePath,
-    width: input.width ?? null,
-    height: input.height ?? null,
+    width: detectedDimensions?.width ?? input.width ?? null,
+    height: detectedDimensions?.height ?? input.height ?? null,
     sizeBytes: input.buffer.byteLength,
     sha256: sha256(input.buffer),
     createdAt: nowIso(),

@@ -16,8 +16,8 @@ export default async function SettingsPage() {
         <h2>{t(language, "settingsTitle")}</h2>
         <p>
           {language === "zh"
-            ? "这里同时支持 Google 官方 Gemini 接口和 Gemini 兼容中转站。使用官方接口时，Base URL 留空即可；使用中转站时，填写对方提供的 base_url。"
-            : "This page supports both the official Google Gemini API and Gemini-compatible relay services. Leave Base URL empty for Google, or paste the relay provider's base_url here."}
+            ? "这里同时支持 Google 官方 Gemini、Gemini 兼容中转，以及飞书多维表格自动同步。使用官方接口时，Base URL 留空即可；使用中转时，填写对方提供的 base_url。"
+            : "This page supports the official Google Gemini API, Gemini-compatible relay services, and automatic Feishu Bitable sync. Leave Base URL empty for Google, or paste the relay provider's base_url here."}
         </p>
       </section>
 

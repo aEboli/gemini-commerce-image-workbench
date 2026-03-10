@@ -16,12 +16,15 @@ import type {
   JobRecord,
   JobStatus,
   LocalizedCreativeInputs,
+  ProviderDebugInfo,
+  ReferenceLayoutAnalysis,
+  ReferencePosterCopy,
   TemplateFilters,
   TemplateInput,
   TemplateRecord,
   UiLanguage,
 } from "@/lib/types";
-import { createId, fromJson, nowIso, toJson } from "@/lib/utils";
+import { createId, detectImageDimensions, fromJson, nowIso, toJson } from "@/lib/utils";
 
 declare global {
   var commerceStudioDb: DatabaseSync | undefined;
@@ -48,12 +51,20 @@ export interface JobListFilters {
 
 export interface CreateJobInput {
   id: string;
+  creationMode: JobRecord["creationMode"];
+  referenceStrength: JobRecord["referenceStrength"];
+  preserveReferenceText: boolean;
   productName: string;
   sku: string;
   category: string;
   brandName: string;
   sellingPoints: string;
   restrictions: string;
+  customPrompt: string;
+  customNegativePrompt: string;
+  autoOptimizePrompt: boolean;
+  referenceExtraPrompt: string;
+  referenceNegativePrompt: string;
   country: string;
   language: string;
   platform: string;
@@ -66,7 +77,10 @@ export interface CreateJobInput {
   sourceDescription: string;
   uiLanguage: UiLanguage;
   selectedTemplateOverrides: Record<string, string>;
+  referenceLayoutOverride: ReferenceLayoutAnalysis | null;
+  referencePosterCopyOverride: ReferencePosterCopy | null;
   sourceAssets: AssetRecord[];
+  referenceAssets: AssetRecord[];
   items: JobItemRecord[];
 }
 
@@ -74,12 +88,20 @@ function rowToJob(row: any): JobRecord {
   return {
     id: row.id,
     status: row.status,
+    creationMode: row.creation_mode ?? "standard",
+    referenceStrength: row.reference_strength ?? "balanced",
+    preserveReferenceText: Boolean(row.preserve_reference_text ?? 1),
     productName: row.product_name,
     sku: row.sku,
     category: row.category,
     brandName: row.brand_name,
     sellingPoints: row.selling_points,
     restrictions: row.restrictions,
+    customPrompt: row.custom_prompt ?? "",
+    customNegativePrompt: row.custom_negative_prompt ?? "",
+    autoOptimizePrompt: Boolean(row.auto_optimize_prompt ?? 0),
+    referenceExtraPrompt: row.reference_extra_prompt ?? "",
+    referenceNegativePrompt: row.reference_negative_prompt ?? "",
     country: row.country,
     language: row.language,
     platform: row.platform,
@@ -97,6 +119,10 @@ function rowToJob(row: any): JobRecord {
     uiLanguage: row.ui_language,
     selectedTemplateOverrides: fromJson(row.selected_template_overrides, {}),
     localizedInputs: fromJson<LocalizedCreativeInputs | null>(row.localized_inputs_json, null),
+    referenceLayoutOverride: fromJson<ReferenceLayoutAnalysis | null>(row.reference_layout_override_json, null),
+    referencePosterCopyOverride: fromJson<ReferencePosterCopy | null>(row.reference_poster_copy_override_json, null),
+    referenceLayoutAnalysis: fromJson<ReferenceLayoutAnalysis | null>(row.reference_layout_analysis_json, null),
+    referencePosterCopy: fromJson<ReferencePosterCopy | null>(row.reference_poster_copy_json, null),
   };
 }
 
@@ -122,6 +148,8 @@ function rowToItem(row: any): JobItemRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     errorMessage: row.error_message,
+    warningMessage: row.warning_message ?? null,
+    providerDebug: fromJson<ProviderDebugInfo | null>(row.provider_debug_json, null),
   };
 }
 
@@ -140,6 +168,33 @@ function rowToAsset(row: any): AssetRecord {
     sha256: row.sha256,
     createdAt: row.created_at,
   };
+}
+
+function ensureActualAssetDimensions(asset: AssetRecord): AssetRecord {
+  if (asset.mimeType === "image/svg+xml" || !asset.filePath || !fs.existsSync(asset.filePath)) {
+    return asset;
+  }
+
+  try {
+    const buffer = fs.readFileSync(asset.filePath);
+    const detected = detectImageDimensions(buffer, asset.mimeType);
+    if (!detected) {
+      return asset;
+    }
+
+    if (asset.width === detected.width && asset.height === detected.height) {
+      return asset;
+    }
+
+    getDb().prepare("UPDATE assets SET width = ?, height = ? WHERE id = ?").run(detected.width, detected.height, asset.id);
+    return {
+      ...asset,
+      width: detected.width,
+      height: detected.height,
+    };
+  } catch {
+    return asset;
+  }
 }
 
 function rowToTemplate(row: any): TemplateRecord {
@@ -191,6 +246,34 @@ function ensureSettingsColumns(database: DatabaseSync) {
       name: "default_api_headers",
       statement: "ALTER TABLE settings ADD COLUMN default_api_headers TEXT NOT NULL DEFAULT ''",
     },
+    {
+      name: "feishu_sync_enabled",
+      statement: "ALTER TABLE settings ADD COLUMN feishu_sync_enabled INTEGER NOT NULL DEFAULT 0",
+    },
+    {
+      name: "feishu_app_id",
+      statement: "ALTER TABLE settings ADD COLUMN feishu_app_id TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "feishu_app_secret",
+      statement: "ALTER TABLE settings ADD COLUMN feishu_app_secret TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "feishu_bitable_app_token",
+      statement: "ALTER TABLE settings ADD COLUMN feishu_bitable_app_token TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "feishu_bitable_table_id",
+      statement: "ALTER TABLE settings ADD COLUMN feishu_bitable_table_id TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "feishu_upload_parent_type",
+      statement: "ALTER TABLE settings ADD COLUMN feishu_upload_parent_type TEXT NOT NULL DEFAULT 'bitable_image'",
+    },
+    {
+      name: "feishu_field_mapping_json",
+      statement: "ALTER TABLE settings ADD COLUMN feishu_field_mapping_json TEXT NOT NULL DEFAULT '{}'",
+    },
   ];
 
   for (const column of columnDefinitions) {
@@ -210,6 +293,14 @@ function ensureJobItemColumns(database: DatabaseSync) {
       name: "review_status",
       statement: "ALTER TABLE job_items ADD COLUMN review_status TEXT NOT NULL DEFAULT 'unreviewed'",
     },
+    {
+      name: "warning_message",
+      statement: "ALTER TABLE job_items ADD COLUMN warning_message TEXT",
+    },
+    {
+      name: "provider_debug_json",
+      statement: "ALTER TABLE job_items ADD COLUMN provider_debug_json TEXT",
+    },
   ];
 
   for (const column of columnDefinitions) {
@@ -226,12 +317,60 @@ function ensureJobColumns(database: DatabaseSync) {
 
   const columnDefinitions = [
     {
+      name: "creation_mode",
+      statement: "ALTER TABLE jobs ADD COLUMN creation_mode TEXT NOT NULL DEFAULT 'standard'",
+    },
+    {
+      name: "reference_strength",
+      statement: "ALTER TABLE jobs ADD COLUMN reference_strength TEXT NOT NULL DEFAULT 'balanced'",
+    },
+    {
+      name: "preserve_reference_text",
+      statement: "ALTER TABLE jobs ADD COLUMN preserve_reference_text INTEGER NOT NULL DEFAULT 1",
+    },
+    {
+      name: "custom_prompt",
+      statement: "ALTER TABLE jobs ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "auto_optimize_prompt",
+      statement: "ALTER TABLE jobs ADD COLUMN auto_optimize_prompt INTEGER NOT NULL DEFAULT 0",
+    },
+    {
+      name: "custom_negative_prompt",
+      statement: "ALTER TABLE jobs ADD COLUMN custom_negative_prompt TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "reference_extra_prompt",
+      statement: "ALTER TABLE jobs ADD COLUMN reference_extra_prompt TEXT NOT NULL DEFAULT ''",
+    },
+    {
+      name: "reference_negative_prompt",
+      statement: "ALTER TABLE jobs ADD COLUMN reference_negative_prompt TEXT NOT NULL DEFAULT ''",
+    },
+    {
       name: "selected_template_overrides",
       statement: "ALTER TABLE jobs ADD COLUMN selected_template_overrides TEXT NOT NULL DEFAULT '{}'",
     },
     {
       name: "localized_inputs_json",
       statement: "ALTER TABLE jobs ADD COLUMN localized_inputs_json TEXT",
+    },
+    {
+      name: "reference_layout_override_json",
+      statement: "ALTER TABLE jobs ADD COLUMN reference_layout_override_json TEXT",
+    },
+    {
+      name: "reference_poster_copy_override_json",
+      statement: "ALTER TABLE jobs ADD COLUMN reference_poster_copy_override_json TEXT",
+    },
+    {
+      name: "reference_layout_analysis_json",
+      statement: "ALTER TABLE jobs ADD COLUMN reference_layout_analysis_json TEXT",
+    },
+    {
+      name: "reference_poster_copy_json",
+      statement: "ALTER TABLE jobs ADD COLUMN reference_poster_copy_json TEXT",
     },
   ];
 
@@ -257,6 +396,13 @@ function ensureSchema(database: DatabaseSync) {
       storage_dir TEXT NOT NULL,
       max_concurrency INTEGER NOT NULL DEFAULT 2,
       default_ui_language TEXT NOT NULL DEFAULT 'zh',
+      feishu_sync_enabled INTEGER NOT NULL DEFAULT 0,
+      feishu_app_id TEXT NOT NULL DEFAULT '',
+      feishu_app_secret TEXT NOT NULL DEFAULT '',
+      feishu_bitable_app_token TEXT NOT NULL DEFAULT '',
+      feishu_bitable_table_id TEXT NOT NULL DEFAULT '',
+      feishu_upload_parent_type TEXT NOT NULL DEFAULT 'bitable_image',
+      feishu_field_mapping_json TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -264,12 +410,20 @@ function ensureSchema(database: DatabaseSync) {
     CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       status TEXT NOT NULL,
+      creation_mode TEXT NOT NULL DEFAULT 'standard',
+      reference_strength TEXT NOT NULL DEFAULT 'balanced',
+      preserve_reference_text INTEGER NOT NULL DEFAULT 1,
       product_name TEXT NOT NULL,
       sku TEXT NOT NULL,
       category TEXT NOT NULL,
       brand_name TEXT NOT NULL,
       selling_points TEXT NOT NULL,
       restrictions TEXT NOT NULL,
+      custom_prompt TEXT NOT NULL DEFAULT '',
+      custom_negative_prompt TEXT NOT NULL DEFAULT '',
+      auto_optimize_prompt INTEGER NOT NULL DEFAULT 0,
+      reference_extra_prompt TEXT NOT NULL DEFAULT '',
+      reference_negative_prompt TEXT NOT NULL DEFAULT '',
       country TEXT NOT NULL,
       language TEXT NOT NULL,
       platform TEXT NOT NULL,
@@ -286,7 +440,11 @@ function ensureSchema(database: DatabaseSync) {
       source_description TEXT NOT NULL,
       ui_language TEXT NOT NULL,
       selected_template_overrides TEXT NOT NULL DEFAULT '{}',
-      localized_inputs_json TEXT
+      localized_inputs_json TEXT,
+      reference_layout_override_json TEXT,
+      reference_poster_copy_override_json TEXT,
+      reference_layout_analysis_json TEXT,
+      reference_poster_copy_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS job_items (
@@ -307,6 +465,8 @@ function ensureSchema(database: DatabaseSync) {
       generated_asset_id TEXT,
       layout_asset_id TEXT,
       review_status TEXT NOT NULL DEFAULT 'unreviewed',
+      warning_message TEXT,
+      provider_debug_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       error_message TEXT
@@ -372,8 +532,10 @@ function ensureSchema(database: DatabaseSync) {
     database
       .prepare(
         `INSERT INTO settings (
-          id, default_api_key, default_text_model, default_image_model, default_api_base_url, default_api_version, default_api_headers, storage_dir, max_concurrency, default_ui_language, created_at, updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          id, default_api_key, default_text_model, default_image_model, default_api_base_url, default_api_version, default_api_headers, storage_dir, max_concurrency, default_ui_language,
+          feishu_sync_enabled, feishu_app_id, feishu_app_secret, feishu_bitable_app_token, feishu_bitable_table_id, feishu_upload_parent_type, feishu_field_mapping_json,
+          created_at, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         DEFAULT_SETTINGS.defaultApiKey,
@@ -385,6 +547,13 @@ function ensureSchema(database: DatabaseSync) {
         DEFAULT_SETTINGS.storageDir,
         DEFAULT_SETTINGS.maxConcurrency,
         DEFAULT_SETTINGS.defaultUiLanguage,
+        DEFAULT_SETTINGS.feishuSyncEnabled ? 1 : 0,
+        DEFAULT_SETTINGS.feishuAppId,
+        DEFAULT_SETTINGS.feishuAppSecret,
+        DEFAULT_SETTINGS.feishuBitableAppToken,
+        DEFAULT_SETTINGS.feishuBitableTableId,
+        DEFAULT_SETTINGS.feishuUploadParentType,
+        DEFAULT_SETTINGS.feishuFieldMappingJson,
         now,
         now,
       );
@@ -442,6 +611,13 @@ export function getSettings(): AppSettings {
     storageDir: row.storage_dir,
     maxConcurrency: row.max_concurrency,
     defaultUiLanguage: row.default_ui_language,
+    feishuSyncEnabled: Boolean(row.feishu_sync_enabled ?? 0),
+    feishuAppId: row.feishu_app_id ?? "",
+    feishuAppSecret: row.feishu_app_secret ?? "",
+    feishuBitableAppToken: row.feishu_bitable_app_token ?? "",
+    feishuBitableTableId: row.feishu_bitable_table_id ?? "",
+    feishuUploadParentType: row.feishu_upload_parent_type ?? "bitable_image",
+    feishuFieldMappingJson: row.feishu_field_mapping_json ?? "{}",
   };
 }
 
@@ -458,6 +634,13 @@ export function updateSettings(input: Partial<AppSettings>): AppSettings {
     storageDir: input.storageDir ?? settings.storageDir,
     maxConcurrency: input.maxConcurrency ?? settings.maxConcurrency,
     defaultUiLanguage: input.defaultUiLanguage ?? settings.defaultUiLanguage,
+    feishuSyncEnabled: input.feishuSyncEnabled ?? settings.feishuSyncEnabled,
+    feishuAppId: input.feishuAppId ?? settings.feishuAppId,
+    feishuAppSecret: input.feishuAppSecret ?? settings.feishuAppSecret,
+    feishuBitableAppToken: input.feishuBitableAppToken ?? settings.feishuBitableAppToken,
+    feishuBitableTableId: input.feishuBitableTableId ?? settings.feishuBitableTableId,
+    feishuUploadParentType: input.feishuUploadParentType ?? settings.feishuUploadParentType,
+    feishuFieldMappingJson: input.feishuFieldMappingJson ?? settings.feishuFieldMappingJson,
   };
 
   database
@@ -472,6 +655,13 @@ export function updateSettings(input: Partial<AppSettings>): AppSettings {
         storage_dir = ?,
         max_concurrency = ?,
         default_ui_language = ?,
+        feishu_sync_enabled = ?,
+        feishu_app_id = ?,
+        feishu_app_secret = ?,
+        feishu_bitable_app_token = ?,
+        feishu_bitable_table_id = ?,
+        feishu_upload_parent_type = ?,
+        feishu_field_mapping_json = ?,
         updated_at = ?
       WHERE id = 1`
     )
@@ -485,6 +675,13 @@ export function updateSettings(input: Partial<AppSettings>): AppSettings {
       nextSettings.storageDir,
       nextSettings.maxConcurrency,
       nextSettings.defaultUiLanguage,
+      nextSettings.feishuSyncEnabled ? 1 : 0,
+      nextSettings.feishuAppId,
+      nextSettings.feishuAppSecret,
+      nextSettings.feishuBitableAppToken,
+      nextSettings.feishuBitableTableId,
+      nextSettings.feishuUploadParentType,
+      nextSettings.feishuFieldMappingJson,
       nowIso(),
     );
 
@@ -727,19 +924,28 @@ export function createJob(input: CreateJobInput): JobRecord {
     database
       .prepare(
         `INSERT INTO jobs (
-          id, status, product_name, sku, category, brand_name, selling_points, restrictions, country, language, platform,
+          id, status, creation_mode, reference_strength, preserve_reference_text, product_name, sku, category, brand_name, selling_points, restrictions, custom_prompt, custom_negative_prompt, auto_optimize_prompt, reference_extra_prompt, reference_negative_prompt, country, language, platform,
           selected_types, selected_ratios, selected_resolutions, variants_per_type, include_copy_layout,
-          batch_file_count, created_at, updated_at, source_description, ui_language, selected_template_overrides
-        ) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          batch_file_count, created_at, updated_at, source_description, ui_language, selected_template_overrides,
+          reference_layout_override_json, reference_poster_copy_override_json
+        ) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.id,
+        input.creationMode,
+        input.referenceStrength,
+        input.preserveReferenceText ? 1 : 0,
         input.productName,
         input.sku,
         input.category,
         input.brandName,
         input.sellingPoints,
         input.restrictions,
+        input.customPrompt,
+        input.customNegativePrompt,
+        input.autoOptimizePrompt ? 1 : 0,
+        input.referenceExtraPrompt,
+        input.referenceNegativePrompt,
         input.country,
         input.language,
         input.platform,
@@ -754,6 +960,8 @@ export function createJob(input: CreateJobInput): JobRecord {
         input.sourceDescription,
         input.uiLanguage,
         toJson(input.selectedTemplateOverrides),
+        toJson(input.referenceLayoutOverride),
+        toJson(input.referencePosterCopyOverride),
       );
 
     const insertAsset = database.prepare(
@@ -762,7 +970,7 @@ export function createJob(input: CreateJobInput): JobRecord {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
-    for (const asset of input.sourceAssets) {
+    for (const asset of [...input.sourceAssets, ...input.referenceAssets]) {
       insertAsset.run(
         asset.id,
         asset.jobId,
@@ -782,8 +990,8 @@ export function createJob(input: CreateJobInput): JobRecord {
     const insertItem = database.prepare(
       `INSERT INTO job_items (
         id, job_id, source_asset_id, source_asset_name, image_type, ratio, resolution_label, width, height, variant_index,
-        status, prompt_text, negative_prompt, copy_json, generated_asset_id, layout_asset_id, review_status, created_at, updated_at, error_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        status, prompt_text, negative_prompt, copy_json, generated_asset_id, layout_asset_id, review_status, warning_message, provider_debug_json, created_at, updated_at, error_message
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     for (const item of input.items) {
@@ -805,6 +1013,8 @@ export function createJob(input: CreateJobInput): JobRecord {
         item.generatedAssetId,
         item.layoutAssetId,
         item.reviewStatus,
+        item.warningMessage,
+        toJson(item.providerDebug),
         item.createdAt,
         item.updatedAt,
         item.errorMessage,
@@ -834,16 +1044,22 @@ export function getJobDetails(jobId: string): JobDetails | null {
 
   const sourceAssets = (database
     .prepare("SELECT * FROM assets WHERE job_id = ? AND kind = 'source' ORDER BY created_at ASC")
-    .all(jobId) as any[]).map(rowToAsset);
+    .all(jobId) as any[]).map((row) => ensureActualAssetDimensions(rowToAsset(row)));
+  const referenceAssets = (database
+    .prepare("SELECT * FROM assets WHERE job_id = ? AND kind = 'reference' ORDER BY created_at ASC")
+    .all(jobId) as any[]).map((row) => ensureActualAssetDimensions(rowToAsset(row)));
   const items = (database
     .prepare("SELECT * FROM job_items WHERE job_id = ? ORDER BY created_at ASC")
     .all(jobId) as any[]).map(rowToItem);
-  const allAssets = (database.prepare("SELECT * FROM assets WHERE job_id = ?").all(jobId) as any[]).map(rowToAsset);
+  const allAssets = (database.prepare("SELECT * FROM assets WHERE job_id = ?").all(jobId) as any[]).map((row) =>
+    ensureActualAssetDimensions(rowToAsset(row)),
+  );
   const assetMap = new Map(allAssets.map((asset) => [asset.id, asset]));
 
   return {
     job,
     sourceAssets,
+    referenceAssets,
     items: items.map((item) => ({
       ...item,
       generatedAsset: item.generatedAssetId ? assetMap.get(item.generatedAssetId) ?? null : null,
@@ -932,6 +1148,19 @@ export function updateJobLocalizedInputs(jobId: string, localizedInputs: Localiz
     .run(toJson(localizedInputs), nowIso(), jobId);
 }
 
+export function updateJobReferenceArtifacts(
+  jobId: string,
+  referenceLayoutAnalysis: ReferenceLayoutAnalysis | null,
+  referencePosterCopy: ReferencePosterCopy | null,
+) {
+  const database = getDb();
+  database
+    .prepare(
+      "UPDATE jobs SET reference_layout_analysis_json = ?, reference_poster_copy_json = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(toJson(referenceLayoutAnalysis), toJson(referencePosterCopy), nowIso(), jobId);
+}
+
 export function updateJobItemProcessing(itemId: string) {
   const database = getDb();
   database.prepare("UPDATE job_items SET status = 'processing', updated_at = ? WHERE id = ?").run(nowIso(), itemId);
@@ -940,9 +1169,12 @@ export function updateJobItemProcessing(itemId: string) {
 export function updateJobItemResult(input: {
   itemId: string;
   promptText: string;
+  negativePrompt?: string | null;
   copy: GeneratedCopyBundle;
   generatedAssetId: string;
   layoutAssetId?: string | null;
+  warningMessage?: string | null;
+  providerDebug?: ProviderDebugInfo | null;
 }) {
   const database = getDb();
   database
@@ -950,28 +1182,42 @@ export function updateJobItemResult(input: {
       `UPDATE job_items SET
         status = 'completed',
         prompt_text = ?,
+        negative_prompt = ?,
         copy_json = ?,
         generated_asset_id = ?,
         layout_asset_id = ?,
+        warning_message = ?,
+        provider_debug_json = ?,
         error_message = NULL,
         updated_at = ?
       WHERE id = ?`
     )
     .run(
       input.promptText,
+      input.negativePrompt ?? null,
       toJson(input.copy),
       input.generatedAssetId,
       input.layoutAssetId ?? null,
+      input.warningMessage ?? null,
+      toJson(input.providerDebug ?? null),
       nowIso(),
       input.itemId,
     );
 }
 
-export function updateJobItemFailure(itemId: string, errorMessage: string) {
+export function updateJobItemFailure(
+  itemId: string,
+  errorMessage: string,
+  promptText?: string | null,
+  negativePrompt?: string | null,
+  providerDebug?: ProviderDebugInfo | null,
+) {
   const database = getDb();
   database
-    .prepare("UPDATE job_items SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?")
-    .run(errorMessage, nowIso(), itemId);
+    .prepare(
+      "UPDATE job_items SET status = 'failed', prompt_text = COALESCE(?, prompt_text), negative_prompt = COALESCE(?, negative_prompt), provider_debug_json = ?, error_message = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(promptText ?? null, negativePrompt ?? null, toJson(providerDebug ?? null), errorMessage, nowIso(), itemId);
 }
 
 export function insertAsset(asset: AssetRecord) {

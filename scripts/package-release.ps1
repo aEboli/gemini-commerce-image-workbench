@@ -58,12 +58,18 @@ if (Test-Path $nestedReleaseDir) {
 
 $cleanupItems = @(
   '.git',
+  '.codex',
+  '.playwright-cli',
   '.runtime',
+  'AGENTS.md',
   'app',
   'components',
+  'doc',
+  'docs',
   'lib',
   'scripts',
   'output',
+  'Readme',
   'tmp',
   'release',
   '-',
@@ -85,6 +91,7 @@ $cleanupItems = @(
   '使用说明-简体中文.md',
   '启动开发版.bat',
   '启动正式版.bat',
+  '构建V2单文件安装器.bat',
   '安全打包发布版.bat',
   '安全打包并生成压缩包.bat',
   '局域网访问检查清单-简体中文.md',
@@ -111,21 +118,32 @@ if (Test-Path $systemNodePath) {
 if ($SanitizeSecrets) {
   $releaseDb = Join-Path $releaseDir '.\data\commerce-image-studio.sqlite'
   if (Test-Path $releaseDb) {
-    $sanitizeScript = @"
+    $sanitizeScript = @'
 const { DatabaseSync } = require("node:sqlite");
 const dbPath = process.argv[2];
 const db = new DatabaseSync(dbPath);
-const row = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get();
-if (row) {
-  db.prepare("UPDATE settings SET default_api_key = '', default_api_headers = '', updated_at = datetime('now') WHERE id = 1").run();
+const hasTable = (name) => db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+if (hasTable("settings")) {
+  db.prepare("UPDATE settings SET default_api_key = '', default_api_headers = '', feishu_app_secret = '', updated_at = datetime('now') WHERE id = 1").run();
+}
+for (const tableName of ["assets", "job_items", "jobs"]) {
+  if (hasTable(tableName)) {
+    db.prepare(`DELETE FROM ${tableName}`).run();
+  }
 }
 db.close();
-"@
+'@
     $sanitizeScript | & $systemNodePath - $releaseDb
     if ($LASTEXITCODE -ne 0) {
       throw 'Failed to sanitize release database secrets.'
     }
   }
+
+  $releaseAssetsDir = Join-Path $releaseDir '.\data\assets'
+  if (Test-Path $releaseAssetsDir) {
+    Remove-Item -Path $releaseAssetsDir -Recurse -Force
+  }
+  New-Item -ItemType Directory -Path $releaseAssetsDir -Force | Out-Null
 }
 
 $launcher = @(
