@@ -112,6 +112,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Reference remix mode requires at least one reference image." }, { status: 400 });
   }
 
+  if (
+    !Number.isInteger(effectivePayload.variantsPerType) ||
+    effectivePayload.variantsPerType < 1 ||
+    effectivePayload.variantsPerType > 10
+  ) {
+    return NextResponse.json({ error: "Quantity must be an integer between 1 and 10." }, { status: 400 });
+  }
+
   const sourceCount = effectivePayload.creationMode === "prompt" ? Math.max(files.length, 1) : files.length;
   const totalVariants =
     sourceCount *

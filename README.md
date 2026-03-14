@@ -6,8 +6,8 @@
 面向电商运营、设计与商品团队的本地化 AI 生图工作台。  
 A local-network friendly AI image generation workstation for ecommerce operators, designers, and merchandising teams.
 
-**Version:** `v0.4.0`  
-**Latest Windows Installer:** `IMAGE-STUDIO-WINDOWS-0.4.0.exe`
+**Version:** `v0.4.1`  
+**Latest Windows Installer:** `IMAGE-STUDIO-WINDOWS-0.4.1.exe`
 
 [Releases](https://github.com/aEboli/gemini-commerce-image-workbench/releases) · [中文操作说明](./Readme/使用说明-电商AI出图工作台.md) · [PRD](./Readme/PRD-电商AI出图工作台.md) · [Source Code](https://github.com/aEboli/gemini-commerce-image-workbench)
 
@@ -30,25 +30,19 @@ Commerce Image Studio is a production-oriented workstation for batch product ima
 | 审核结果并只导出“通过”的素材 | Review outputs and export only approved assets |
 | 自动把生成结果同步到飞书多维表格 | Automatically sync generated outputs into Feishu Bitable |
 
-## 版本亮点 / What’s New in v0.4.0
+## 版本亮点 / What’s New in v0.4.1
 
-| 新功能 | 说明 |
+| 更新项 | 说明 |
 | --- | --- |
-| 五种创作模式 | 覆盖标准出图、提示词模式、参考图复刻、套图模式与亚马逊 A+ 图 |
-| 审核工作台升级 | 历史缩略图、灯箱切换、详情聚焦与通过项导出体验更完整 |
-| 模板与品牌协作 | 模板中心、品牌库、市场规则和提示词链路更适合团队复用 |
-| 飞书同步增强 | 字段映射、连通测试、写回链路与结果结构更稳定 |
-| 创建与设置页重构 | 参数胶囊、说明卡、设置页概览和最近任务区统一为新主题样式 |
-| 安全发布口径 | 版本化安装器命名，发布时可清理密钥、任务记录与素材目录 |
+| 安装器启动修复 | 修复 Windows 安装器发布包漏带 `sharp` 运行时 DLL，解决首次打开首页直接 `Internal Server Error` 的问题 |
+| 发布链路补强 | 发布脚本会主动带上 `sharp` 原生依赖，避免安装包与绿色版出现相同运行时缺件 |
+| 功能基线延续 | 继续保留 `v0.4.0` 的五种创作模式、审核工作台、模板与品牌库、飞书同步和安全发布能力 |
 
-### v0.4.0 in English
+### v0.4.1 in English
 
-- Five creation modes: standard, prompt, reference remake, image-set, and Amazon A+ workflows
-- Stronger review workspace with history thumbnails, lightbox navigation, detail focus, and approved-only export
-- Better template and brand collaboration for reusable market-aware production
-- More stable Feishu sync with field mapping, connectivity checks, and structured write-back
-- Refined studio and settings UI with aligned chips, cards, and overview panels
-- Safe release packaging with versioned installers and optional secret sanitization
+- Fixes the Windows installer package so the app no longer fails on first load with an `Internal Server Error`
+- Bundles the required native `sharp` runtime files into release builds and installer outputs
+- Retains the full `v0.4.0` feature set: five creation modes, review workspace, template and brand workflows, Feishu sync, and safe packaging
 
 ## 产品亮点 / Product Highlights
 
@@ -155,8 +149,8 @@ The settings page centralizes Gemini official API config, relay config, Feishu B
 
 - 推荐从 [GitHub Releases](https://github.com/aEboli/gemini-commerce-image-workbench/releases) 下载  
   Recommended download source: [GitHub Releases](https://github.com/aEboli/gemini-commerce-image-workbench/releases)
-- 当前安装器命名为 `IMAGE-STUDIO-WINDOWS-0.4.0.exe`  
-  The current installer is named `IMAGE-STUDIO-WINDOWS-0.4.0.exe`
+- 当前安装器命名为 `IMAGE-STUDIO-WINDOWS-0.4.1.exe`  
+  The current installer is named `IMAGE-STUDIO-WINDOWS-0.4.1.exe`
 - 安装器内置运行时，不需要额外安装 Node.js  
   The installer bundles its own runtime, so Node.js is not required on the target machine
 

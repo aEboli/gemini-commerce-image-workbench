@@ -65,6 +65,27 @@ select {
   padding: 0.9rem 1rem;
 }
 
+select {
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  background: rgba(15, 23, 42, 0.98);
+  color: var(--text);
+}
+
+select option:checked,
+select option:hover,
+select option:focus {
+  background: rgba(30, 41, 59, 0.98);
+  color: #fff;
+}
+
+select option:disabled {
+  color: rgba(148, 163, 184, 0.52);
+}
+
 textarea {
   resize: vertical;
 }

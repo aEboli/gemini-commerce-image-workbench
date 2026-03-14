@@ -6,6 +6,7 @@ import {
   buildImagePrompt,
   buildPromptModePrompt,
   buildReferenceDirectRemakePrompt,
+  normalizeSizeInfoToDualUnits,
   toGeneratedCopyBundleFromRemakePoster,
 } from "@/lib/templates";
 import type {
@@ -148,6 +149,25 @@ const promptTranslationSchema = {
     customNegativePrompt: { type: "string" },
   },
 } as const;
+
+const lineTranslationSchema = {
+  type: "object",
+  required: ["lines"],
+  properties: {
+    lines: { type: "array", items: { type: "string" } },
+  },
+} as const;
+
+const CREATIVE_TRANSLATION_FIELD_LABELS = {
+  productName: "Product name",
+  sellingPoints: "Selling points",
+  restrictions: "Restrictions",
+  sourceDescription: "Additional notes",
+  materialInfo: "Material information",
+  sizeInfo: "Size and weight information",
+} as const;
+
+type CreativeTranslationFieldKey = keyof typeof CREATIVE_TRANSLATION_FIELD_LABELS;
 
 const referencePosterCopySchema = {
   type: "object",
@@ -407,6 +427,125 @@ function buildSimplifiedChineseOnlyLine(language: string) {
     : null;
 }
 
+function isCjkTargetLanguage(language: string) {
+  return /^(zh|ja|ko)/i.test(language.trim());
+}
+
+function containsHanCharacters(value: string) {
+  return /[\u3400-\u9fff]/u.test(value);
+}
+
+function containsLatinWords(value: string) {
+  return /[A-Za-z]{3,}/.test(value);
+}
+
+function shouldBackfillCreativeFieldTranslation(input: {
+  language: string;
+  original?: string | null;
+  translated?: string | null;
+}) {
+  const normalizedOriginal = normalizePromptText(input.original);
+  if (!normalizedOriginal) {
+    return false;
+  }
+
+  const normalizedTranslated = normalizePromptText(input.translated);
+  if (!normalizedTranslated) {
+    return true;
+  }
+
+  const targetLanguage = input.language.trim().toLowerCase();
+  if (targetLanguage.startsWith("zh")) {
+    return containsLatinWords(normalizedOriginal) && !containsHanCharacters(normalizedTranslated) && normalizedOriginal === normalizedTranslated;
+  }
+
+  if (!isCjkTargetLanguage(targetLanguage)) {
+    return containsHanCharacters(normalizedOriginal) && containsHanCharacters(normalizedTranslated);
+  }
+
+  return false;
+}
+
+async function translateCreativeFieldsFallback(input: ProviderConfig & {
+  textModel: string;
+  country: string;
+  language: string;
+  platform: string;
+  category: string;
+  brandName: string;
+  sku: string;
+  fields: Partial<Record<CreativeTranslationFieldKey, string>>;
+}) {
+  const fieldEntries = (Object.entries(input.fields) as Array<[CreativeTranslationFieldKey, string | undefined]>).filter(
+    ([, value]) => Boolean(value?.trim()),
+  ) as Array<[CreativeTranslationFieldKey, string]>;
+
+  if (!fieldEntries.length) {
+    return {} as Partial<Record<CreativeTranslationFieldKey, string>>;
+  }
+
+  const ai = createClient(input);
+  const repairedEntries = await Promise.all(
+    fieldEntries.map(async ([field, value]) => {
+      const sourceLines = value.split(/\r?\n/);
+      const lines = [
+        "You are a localization specialist for e-commerce creative production.",
+        `Translate the following ${CREATIVE_TRANSLATION_FIELD_LABELS[field]} into the target output language ${input.language} for market ${input.country}.`,
+        buildSimplifiedChineseOnlyLine(input.language),
+        [
+          `Target platform: ${input.platform}`,
+          normalizePromptCategory(input.category) ? `Product category: ${normalizePromptCategory(input.category)}` : null,
+        ]
+          .filter(Boolean)
+          .join(". ") + ".",
+        "Rules:",
+        "- Return JSON only in the form {\"lines\": [ ... ]}.",
+        `- Return exactly ${sourceLines.length} items in the lines array, in the same order as the input lines.`,
+        "- Translate every non-empty input line. Do not leave source-language wording unchanged unless it is a brand name, SKU, model number, unit, or proper noun that should stay as-is.",
+        "- Preserve line breaks, list structure, and concise merchandising tone.",
+        "- Do not merge multiple input lines into one output line.",
+        "- Do not add new claims or unsupported details.",
+        "- If a line includes size or weight in only one unit system, keep the original unit and add the corresponding metric or imperial conversion in parentheses.",
+        buildPromptFactLine([["Brand name reference", input.brandName]]),
+        buildPromptFactLine([["SKU reference", input.sku]]),
+        "Input lines:",
+        ...sourceLines.map((line, index) => `${index + 1}. ${line.trim() || "[EMPTY LINE]"}`),
+      ];
+
+      const response = await ai.models.generateContent({
+        model: input.textModel,
+        contents: lines.filter(Boolean).join("\n"),
+        config: {
+          responseMimeType: "application/json",
+          responseJsonSchema: lineTranslationSchema,
+          temperature: 0.1,
+        },
+      });
+
+      const parsed = JSON.parse(response.text ?? "{}") as { lines?: string[] };
+      const translatedLines = Array.isArray(parsed.lines) ? parsed.lines : [];
+      const translatedValue = sourceLines
+        .map((line, index) => {
+          if (!line.trim()) {
+            return "";
+          }
+
+          const translatedLine = translatedLines[index]?.trim();
+          return translatedLine && translatedLine !== "[EMPTY LINE]" ? translatedLine : line.trim();
+        })
+        .join("\n")
+        .trim();
+
+      return [field, translatedValue || value] as const;
+    }),
+  );
+
+  return repairedEntries.reduce<Partial<Record<CreativeTranslationFieldKey, string>>>((accumulator, [field, value]) => {
+    accumulator[field] = value;
+    return accumulator;
+  }, {});
+}
+
 function buildRestrictionsLine(restrictions?: string | null) {
   return buildPromptFactLine([["Restrictions", restrictions]]);
 }
@@ -464,6 +603,7 @@ export async function translateCreativeInputs(input: {
   const hasSourceDescription = Boolean(input.sourceDescription.trim());
   const hasMaterialInfo = Boolean(input.materialInfo?.trim());
   const hasSizeInfo = Boolean(input.sizeInfo?.trim());
+  const normalizedSizeInfo = hasSizeInfo ? normalizeSizeInfoToDualUnits(input.sizeInfo) ?? input.sizeInfo?.trim() ?? "" : "";
 
   if (!hasProductName && !hasSellingPoints && !hasRestrictions && !hasSourceDescription && !hasMaterialInfo && !hasSizeInfo) {
     return null;
@@ -484,6 +624,7 @@ export async function translateCreativeInputs(input: {
     "- Preserve meaning faithfully and keep the result concise, natural, and suitable for prompt generation and marketing copy.",
     "- If a field is already appropriate for the target language, keep it with only light normalization.",
     "- Do not add any new claims or unsupported details.",
+    "- If size or weight information is provided in only one unit system, keep the original unit and add the corresponding metric or imperial conversion in parentheses.",
     "- Only return keys for fields that were actually provided with non-empty content.",
     buildPromptFactLine([["Brand name reference", input.brandName]]),
     buildPromptFactLine([["SKU reference", input.sku]]),
@@ -505,7 +646,7 @@ export async function translateCreativeInputs(input: {
     lines.push(`Material information: ${input.materialInfo?.trim()}`);
   }
   if (hasSizeInfo) {
-    lines.push(`Size and weight information: ${input.sizeInfo?.trim()}`);
+    lines.push(`Size and weight information: ${normalizedSizeInfo}`);
   }
 
   lines.push("Return JSON only.");
@@ -530,13 +671,108 @@ export async function translateCreativeInputs(input: {
     sizeInfo?: string;
   };
 
-  return {
+  const localizedInputs: LocalizedCreativeInputs = {
     productName: hasProductName ? parsed.productName?.trim() || input.productName : "",
     sellingPoints: hasSellingPoints ? parsed.sellingPoints?.trim() || input.sellingPoints : "",
     restrictions: hasRestrictions ? parsed.restrictions?.trim() || input.restrictions : "",
     sourceDescription: hasSourceDescription ? parsed.sourceDescription?.trim() || input.sourceDescription : "",
     materialInfo: hasMaterialInfo ? parsed.materialInfo?.trim() || input.materialInfo?.trim() || "" : "",
     sizeInfo: hasSizeInfo ? parsed.sizeInfo?.trim() || input.sizeInfo?.trim() || "" : "",
+  };
+
+  const fallbackFields: Partial<Record<CreativeTranslationFieldKey, string>> = {};
+
+  if (
+    hasProductName &&
+    shouldBackfillCreativeFieldTranslation({
+      language: input.language,
+      original: input.productName,
+      translated: localizedInputs.productName,
+    })
+  ) {
+    fallbackFields.productName = input.productName;
+  }
+
+  if (
+    hasSellingPoints &&
+    shouldBackfillCreativeFieldTranslation({
+      language: input.language,
+      original: input.sellingPoints,
+      translated: localizedInputs.sellingPoints,
+    })
+  ) {
+    fallbackFields.sellingPoints = input.sellingPoints;
+  }
+
+  if (
+    hasRestrictions &&
+    shouldBackfillCreativeFieldTranslation({
+      language: input.language,
+      original: input.restrictions,
+      translated: localizedInputs.restrictions,
+    })
+  ) {
+    fallbackFields.restrictions = input.restrictions;
+  }
+
+  if (
+    hasSourceDescription &&
+    shouldBackfillCreativeFieldTranslation({
+      language: input.language,
+      original: input.sourceDescription,
+      translated: localizedInputs.sourceDescription,
+    })
+  ) {
+    fallbackFields.sourceDescription = input.sourceDescription;
+  }
+
+  if (
+    hasMaterialInfo &&
+    shouldBackfillCreativeFieldTranslation({
+      language: input.language,
+      original: input.materialInfo,
+      translated: localizedInputs.materialInfo,
+    })
+  ) {
+    fallbackFields.materialInfo = input.materialInfo?.trim();
+  }
+
+  if (
+    hasSizeInfo &&
+    shouldBackfillCreativeFieldTranslation({
+      language: input.language,
+      original: input.sizeInfo,
+      translated: localizedInputs.sizeInfo,
+    })
+  ) {
+    fallbackFields.sizeInfo = input.sizeInfo?.trim();
+  }
+
+  const repairedFields =
+    Object.keys(fallbackFields).length > 0
+      ? await translateCreativeFieldsFallback({
+          apiKey: input.apiKey,
+          textModel: input.textModel,
+          apiBaseUrl: input.apiBaseUrl,
+          apiVersion: input.apiVersion,
+          apiHeaders: input.apiHeaders,
+          country: input.country,
+          language: input.language,
+          platform: input.platform,
+          category: input.category,
+          brandName: input.brandName,
+          sku: input.sku,
+          fields: fallbackFields,
+        }).catch(() => null)
+      : null;
+
+  return {
+    productName: repairedFields?.productName?.trim() || localizedInputs.productName,
+    sellingPoints: repairedFields?.sellingPoints?.trim() || localizedInputs.sellingPoints,
+    restrictions: repairedFields?.restrictions?.trim() || localizedInputs.restrictions,
+    sourceDescription: repairedFields?.sourceDescription?.trim() || localizedInputs.sourceDescription,
+    materialInfo: repairedFields?.materialInfo?.trim() || localizedInputs.materialInfo,
+    sizeInfo: repairedFields?.sizeInfo?.trim() || localizedInputs.sizeInfo,
   };
 }
 
@@ -615,6 +851,7 @@ export async function optimizeUserImagePrompt(input: {
   const ai = createClient(input);
   const category = normalizePromptCategory(input.category);
   const preserveOriginalLanguage = !input.translateToOutputLanguage;
+  const normalizedSizeInfo = normalizeSizeInfoToDualUnits(input.sizeInfo);
   const lines = [
     "You are an e-commerce image prompt optimizer.",
     preserveOriginalLanguage
@@ -636,9 +873,14 @@ export async function optimizeUserImagePrompt(input: {
     ]),
     buildPromptFactLine([["Selling points", input.sellingPoints]]),
     buildPromptFactLine([["Additional notes", input.sourceDescription]]),
+    buildPromptFactLine([["Material information", input.materialInfo]]),
+    buildPromptFactLine([["Size and weight information", normalizedSizeInfo]]),
     buildRestrictionsLine(input.restrictions),
     `Preferred image type: ${input.imageType}.`,
     `Target aspect ratio: ${input.ratio}. Resolution bucket: ${input.resolutionLabel}.`,
+    normalizedSizeInfo
+      ? "If measurements or weight appear anywhere in the optimized prompt, keep them in dual units and preserve the original primary system first."
+      : null,
     `User prompt: ${input.customPrompt}`,
     input.customNegativePrompt?.trim() ? `Negative prompt / avoid: ${input.customNegativePrompt.trim()}` : "",
   ].filter(Boolean);
@@ -973,6 +1215,8 @@ export async function generateEditedImage(input: {
             sellingPoints: input.sellingPoints,
             restrictions: input.restrictions,
             sourceDescription: input.sourceDescription,
+            materialInfo: input.materialInfo,
+            sizeInfo: input.sizeInfo,
             imageType: input.imageType,
             ratio: input.ratio,
             resolutionLabel: input.resolutionLabel,

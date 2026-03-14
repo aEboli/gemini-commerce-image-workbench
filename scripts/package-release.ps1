@@ -14,6 +14,7 @@ $nestedReleaseDir = Join-Path $releaseDir 'release'
 $runtimeDir = Join-Path $releaseDir 'runtime'
 $bundledNodePath = Join-Path $runtimeDir 'node.exe'
 $systemNodePath = 'C:\Program Files\nodejs\node.exe'
+$sharpNativePackageDir = Join-Path $projectRoot 'node_modules\@img\sharp-win32-x64'
 
 Set-Location $projectRoot
 
@@ -46,6 +47,12 @@ Copy-Item -Path '.next\static\*' -Destination $staticTarget -Recurse -Force
 
 if (Test-Path '.\public') {
   Copy-Item -Path '.\public' -Destination $releaseDir -Recurse -Force
+}
+
+if (Test-Path $sharpNativePackageDir) {
+  $sharpNativeTargetDir = Join-Path $releaseDir 'node_modules\@img\sharp-win32-x64'
+  New-Item -ItemType Directory -Path $sharpNativeTargetDir -Force | Out-Null
+  Copy-Item -Path (Join-Path $sharpNativePackageDir '*') -Destination $sharpNativeTargetDir -Recurse -Force
 }
 
 if (Test-Path '.\data') {

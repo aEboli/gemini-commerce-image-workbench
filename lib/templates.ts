@@ -36,6 +36,21 @@ const platformStyles: Record<string, { tone: string; palette: string; layout: st
     palette: "white, red, silver",
     layout: "clean blocks, practical benefit framing",
   },
+  pinduoduo: {
+    tone: "high-value retail, direct, conversion-first",
+    palette: "red, white, high-contrast promotional accents",
+    layout: "dense value communication with bold offer framing",
+  },
+  temu: {
+    tone: "cross-border marketplace, deal-driven, punchy",
+    palette: "orange, white, bright retail contrast",
+    layout: "fast-scanning marketplace module layout",
+  },
+  shein: {
+    tone: "fashion-forward, trend-led, social-commerce ready",
+    palette: "black, white, neutral fashion tones with crisp accents",
+    layout: "editorial fashion-card composition with strong product styling",
+  },
   shopee: {
     tone: "friendly, mobile-first, accessible",
     palette: "orange, white, fresh gradients",
@@ -237,6 +252,8 @@ const SELLING_POINT_IMAGE_TYPES = new Set<ImageType>(["feature-overview", "pain-
 const MATERIAL_IMAGE_TYPES = new Set<ImageType>(["material-craft"]);
 const SIZE_IMAGE_TYPES = new Set<ImageType>(["size-spec"]);
 const IMPERIAL_PRIMARY_COUNTRIES = new Set(["US"]);
+const METRIC_MEASUREMENT_UNITS = new Set(["mm", "cm", "m", "kg", "kgs", "g", "gram", "grams"]);
+const IMPERIAL_MEASUREMENT_UNITS = new Set(["inch", "inches", "in", "ft", "feet", "lb", "lbs", "oz", "ounce", "ounces"]);
 
 function shouldIncludeSellingPoints(imageType: ImageType) {
   return SELLING_POINT_IMAGE_TYPES.has(imageType);
@@ -253,6 +270,25 @@ function shouldIncludeSizeInfo(imageType: ImageType) {
 function formatMeasurementNumber(value: number) {
   const fixed = value >= 10 ? value.toFixed(1) : value.toFixed(2);
   return fixed.replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+}
+
+function detectMeasurementSystems(sizeInfo: string) {
+  const systems = {
+    metric: false,
+    imperial: false,
+  };
+
+  for (const match of sizeInfo.matchAll(/(\d+(?:\.\d+)?)\s*(mm|cm|m|inches|inch|in|ft|feet|kg|kgs|g|grams|gram|lb|lbs|oz|ounce|ounces)\b/gi)) {
+    const unit = match[2].toLowerCase();
+    if (METRIC_MEASUREMENT_UNITS.has(unit)) {
+      systems.metric = true;
+    }
+    if (IMPERIAL_MEASUREMENT_UNITS.has(unit)) {
+      systems.imperial = true;
+    }
+  }
+
+  return systems;
 }
 
 function buildDualMeasurementReference(sizeInfo?: string | null) {
@@ -313,26 +349,41 @@ function buildDualMeasurementReference(sizeInfo?: string | null) {
   return converted.length ? converted.join(" · ") : null;
 }
 
-function buildMeasurementPresentationLines(input: { country: string; sizeInfo?: string | null }) {
-  if (!shouldIncludeSizeInfo("size-spec")) {
-    return [];
+export function normalizeSizeInfoToDualUnits(sizeInfo?: string | null) {
+  const normalized = normalizePromptText(sizeInfo);
+  if (!normalized) {
+    return null;
   }
 
-  const normalized = normalizePromptText(input.sizeInfo);
+  const systems = detectMeasurementSystems(normalized);
+  if (systems.metric && systems.imperial) {
+    return normalized;
+  }
+
+  const dualReference = buildDualMeasurementReference(normalized);
+  return dualReference ? `${normalized}. Dual-unit normalized reference: ${dualReference}` : normalized;
+}
+
+function buildMeasurementPresentationLines(input: { country: string; sizeInfo?: string | null; allowMeasurementFocus?: boolean }) {
+  const normalized = normalizeSizeInfoToDualUnits(input.sizeInfo);
   if (!normalized) {
     return [];
   }
 
   const primarySystem = IMPERIAL_PRIMARY_COUNTRIES.has(input.country) ? "imperial" : "metric";
-  const dualReference = buildDualMeasurementReference(normalized);
+  const dualReference = buildDualMeasurementReference(input.sizeInfo);
 
   return [
-    `Raw size and weight information: ${normalized}.`,
-    dualReference ? `Dual-unit reference: ${dualReference}.` : null,
+    `Size and weight source: ${normalized}.`,
+    dualReference
+      ? `If the operator supplied only one measurement system, expand it into dual units as: ${dualReference}.`
+      : "If both metric and imperial units are already present, keep both systems consistent wherever measurements appear.",
     primarySystem === "imperial"
-      ? "For size/spec visuals, present imperial units first and metric units in parentheses whenever dimensions or weight are shown."
-      : "For size/spec visuals, present metric units first and imperial units in parentheses whenever dimensions or weight are shown.",
-    "If the operator provided both dimensions and weight, keep both in the size/spec module only. Do not move these measurements into other image types.",
+      ? "Whenever dimensions or weight appear, present imperial units first and metric units in parentheses."
+      : "Whenever dimensions or weight appear, present metric units first and imperial units in parentheses.",
+    input.allowMeasurementFocus
+      ? "Use the provided size and weight details as structured shopping information in this output."
+      : "Do not make size or weight the main story of this output. If any measurement appears incidentally, keep it in dual units.",
   ].filter(Boolean);
 }
 
@@ -363,7 +414,8 @@ export function buildCopyPrompt(input: {
   const platformGuide = getPlatformStyle(input.platform);
   const sellingPoints = shouldIncludeSellingPoints(input.imageType) ? input.sellingPoints : "";
   const materialInfo = shouldIncludeMaterialInfo(input.imageType) ? input.materialInfo : "";
-  const sizeInfo = shouldIncludeSizeInfo(input.imageType) ? input.sizeInfo : "";
+  const sizeInfo = normalizeSizeInfoToDualUnits(input.sizeInfo);
+  const allowMeasurementFocus = shouldIncludeSizeInfo(input.imageType);
   const scopeLine = [`Target market: ${countryLabel}`, `Output language: ${languageLabel}`];
   if (categoryLabel) {
     scopeLine.push(`Category: ${categoryLabel}`);
@@ -384,14 +436,17 @@ export function buildCopyPrompt(input: {
     buildPromptFactLine([["Size and weight information", sizeInfo]]),
     ...buildMeasurementPresentationLines({
       country: input.country,
-      sizeInfo,
+      sizeInfo: input.sizeInfo,
+      allowMeasurementFocus,
     }),
     shouldIncludeMaterialInfo(input.imageType)
       ? "Material notes belong only in this material-focused module. Do not turn them into unrelated selling-point copy."
       : "Do not mention material information in this image type unless it is visually obvious from the product itself.",
-    shouldIncludeSizeInfo(input.imageType)
-      ? "Size and weight details belong only in this size/spec module."
-      : "Do not mention size, dimensions, or weight in this image type.",
+    allowMeasurementFocus
+      ? "Use the provided size and weight details inside this size/spec-focused module."
+      : sizeInfo
+        ? "Do not make size or weight the main message of this image type. If measurements appear anywhere, keep them in dual units."
+        : "Do not mention size, dimensions, or weight in this image type.",
     shouldIncludeSellingPoints(input.imageType)
       ? "Use the operator's selling points as the primary copy source for this feature-focused module."
       : "Do not force the operator's selling-point list into this image type.",
@@ -432,7 +487,8 @@ export function buildImagePrompt(input: {
   const categoryLabel = categoryKey ? PRODUCT_CATEGORIES.find((item) => item.value === categoryKey)?.label.en ?? categoryKey : null;
   const scopedSellingPoints = shouldIncludeSellingPoints(input.imageType) ? input.sellingPoints : "";
   const scopedMaterialInfo = shouldIncludeMaterialInfo(input.imageType) ? input.materialInfo : "";
-  const scopedSizeInfo = shouldIncludeSizeInfo(input.imageType) ? input.sizeInfo : "";
+  const scopedSizeInfo = normalizeSizeInfoToDualUnits(input.sizeInfo);
+  const allowMeasurementFocus = shouldIncludeSizeInfo(input.imageType);
   const highlightText = normalizePromptText(scopedSellingPoints) || normalizePromptText(input.copy.highlights.join(", "));
 
   return [
@@ -454,14 +510,17 @@ export function buildImagePrompt(input: {
     buildPromptFactLine([["Size and weight information", scopedSizeInfo]]),
     ...buildMeasurementPresentationLines({
       country: input.country,
-      sizeInfo: scopedSizeInfo,
+      sizeInfo: input.sizeInfo,
+      allowMeasurementFocus,
     }),
     shouldIncludeMaterialInfo(input.imageType)
       ? "Use the provided material details only inside this material-focused image."
       : "Do not display material copy in this image type.",
-    shouldIncludeSizeInfo(input.imageType)
+    allowMeasurementFocus
       ? "Use the provided size and weight details only inside this size/spec image."
-      : "Do not display dimensions or weight in this image type.",
+      : scopedSizeInfo
+        ? "Do not make size or weight the headline of this image type. If measurements appear at all, keep them in dual units."
+        : "Do not display dimensions or weight in this image type.",
     shouldIncludeSellingPoints(input.imageType)
       ? "Use the provided selling points only in this feature-focused image."
       : "Do not inject the operator's selling-point text into this image type.",
@@ -486,6 +545,8 @@ export function buildPromptModePrompt(input: {
   sellingPoints: string;
   restrictions: string;
   sourceDescription: string;
+  materialInfo?: string;
+  sizeInfo?: string;
   imageType: ImageType;
   ratio: string;
   resolutionLabel: string;
@@ -496,6 +557,8 @@ export function buildPromptModePrompt(input: {
   const platformGuide = getPlatformStyle(input.platform);
   const categoryKey = normalizePromptCategory(input.category);
   const categoryLabel = categoryKey ? PRODUCT_CATEGORIES.find((item) => item.value === categoryKey)?.label.en ?? categoryKey : null;
+  const normalizedSizeInfo = normalizeSizeInfoToDualUnits(input.sizeInfo);
+  const allowMeasurementFocus = shouldIncludeSizeInfo(input.imageType);
 
   return [
     `Edit the provided product image for a ${input.platform} listing in ${input.language} for market ${input.country}.`,
@@ -512,10 +575,22 @@ export function buildPromptModePrompt(input: {
     ]),
     buildPromptFactLine([["Selling points", input.sellingPoints]]),
     buildPromptFactLine([["Additional notes", input.sourceDescription]]),
+    buildPromptFactLine([["Material information", input.materialInfo]]),
+    buildPromptFactLine([["Size and weight information", normalizedSizeInfo]]),
+    ...buildMeasurementPresentationLines({
+      country: input.country,
+      sizeInfo: input.sizeInfo,
+      allowMeasurementFocus,
+    }),
     buildRestrictionsLine(input.restrictions),
     `User creative prompt: ${input.customPrompt}`,
     input.customNegativePrompt?.trim()
       ? `Avoid these outcomes: ${input.customNegativePrompt.trim()}`
+      : null,
+    normalizedSizeInfo
+      ? allowMeasurementFocus
+        ? "If this prompt includes visible measurements, keep them in dual units and preserve shopping clarity."
+        : "Do not make size or weight the main focus here. If measurements appear anywhere, keep them in dual units."
       : null,
     "Follow the user creative prompt closely while keeping the uploaded product visually accurate and commercially clean.",
   ]

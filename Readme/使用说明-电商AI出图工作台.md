@@ -26,7 +26,7 @@
 当前对外交付安装器命名为：
 
 ```text
-IMAGE-STUDIO-WINDOWS-0.4.0.exe
+IMAGE-STUDIO-WINDOWS-0.4.1.exe
 ```
 
 ### 3.2 安装后启动

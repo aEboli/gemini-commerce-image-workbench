@@ -781,8 +781,18 @@ textarea:focus {
   background: linear-gradient(180deg, rgba(20, 24, 36, 0.98), rgba(16, 20, 31, 0.98));
 }
 
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: rgba(244, 107, 155, 0.62);
+  box-shadow:
+    0 0 0 1px rgba(244, 107, 155, 0.42),
+    0 0 0 6px rgba(244, 107, 155, 0.12);
+}
+
 select {
   appearance: none;
+  color-scheme: dark;
   background-image:
     linear-gradient(45deg, transparent 50%, rgba(248, 244, 236, 0.68) 50%),
     linear-gradient(135deg, rgba(248, 244, 236, 0.68) 50%, transparent 50%);
@@ -792,6 +802,23 @@ select {
   background-size: 6px 6px, 6px 6px;
   background-repeat: no-repeat;
   padding-right: 44px;
+}
+
+select option,
+select optgroup {
+  background: #11141f;
+  color: var(--ui-text);
+}
+
+select option:checked,
+select option:hover,
+select option:focus {
+  background: #1b2234;
+  color: var(--ui-text-strong);
+}
+
+select option:disabled {
+  color: rgba(182, 176, 166, 0.48);
 }
 
 input[type="color"] {

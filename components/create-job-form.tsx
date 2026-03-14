@@ -27,6 +27,7 @@ type SubmitBlockReason =
   | "files"
   | "prompt"
   | "reference"
+  | "variants"
   | "product-name"
   | "suite-selling-points"
   | "suite-material"
@@ -197,10 +198,15 @@ function copyFor(language: UiLanguage) {
         hint: "一次任务会按：图片 × 类型 × 比例 × 分辨率 × 数量 组合生成。",
         requestCountSummary: "本次将发起 {count} 次图像请求。",
         requestCountBreakdown: "计算方式：输入 {sources} × 类型 {types} × 比例 {ratios} × 分辨率 {resolutions} × 数量 {variants}。",
+        requestCountPendingSummary: "请先填写有效的生成数量（1-10）。",
+        requestCountPendingBreakdown: "数量字段必填，且必须是 1 到 10 的整数后，系统才会计算请求总数。",
         multiTypeBillingHint: "当前选择了多个图片类型。系统会分别调用模型并分别计费，不是同一种图的多张变体。",
         filesRequired: "请至少上传一张图片。",
         promptRequired: "提示词模式下，请填写自定义提示词。",
         referenceFilesRequired: "参考图复刻模式下，请至少上传一张参考图。",
+        quantityRequired: "请填写生成数量。",
+        quantityRangeError: "生成数量必须是 1 到 10 的整数。",
+        quantityPending: "待填写",
         generateError: "提交失败，请检查表单和 API Key。",
         baseSummaryEmpty: "填写图片信息、卖点与限制词。",
         advancedSummaryEmpty: "可选的临时密钥与额外配置。",
@@ -329,10 +335,15 @@ function copyFor(language: UiLanguage) {
         hint: "Each job expands as: images × types × ratios × resolutions × quantity.",
         requestCountSummary: "This job will make {count} image-generation requests.",
         requestCountBreakdown: "Formula: inputs {sources} × types {types} × ratios {ratios} × resolutions {resolutions} × quantity {variants}.",
+        requestCountPendingSummary: "Enter a valid quantity between 1 and 10 first.",
+        requestCountPendingBreakdown: "The quantity field is required and must be an integer from 1 to 10 before the request total can be calculated.",
         multiTypeBillingHint: "Multiple image types are selected. They are generated and billed separately, not as multiple variations of the same type.",
         filesRequired: "Upload at least one product image.",
         promptRequired: "Prompt mode requires a custom text prompt.",
         referenceFilesRequired: "Upload at least one reference image in reference remake mode.",
+        quantityRequired: "Enter the generation quantity first.",
+        quantityRangeError: "Quantity must be an integer between 1 and 10.",
+        quantityPending: "Required",
         generateError: "Submit failed. Check the form and API key.",
         baseSummaryEmpty: "Fill in product details, selling points, and restrictions.",
         advancedSummaryEmpty: "Optional temporary key and extra configuration.",
@@ -342,6 +353,16 @@ function copyFor(language: UiLanguage) {
         ratiosUnit: "ratios",
         resolutionsUnit: "resolutions",
       };
+}
+
+function parseVariantsPerTypeInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 10 ? parsed : null;
 }
 
 function labelFor(value: string, language: UiLanguage, options: Array<{ value: string; label: Record<UiLanguage, string> }>) {
@@ -408,6 +429,7 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
   const [brands, setBrands] = useState<BrandRecord[]>([]);
   const [openSections, setOpenSections] = useState(INITIAL_OPEN_SECTIONS);
   const [payload, setPayload] = useState(INITIAL_PAYLOAD);
+  const [variantsInput, setVariantsInput] = useState(String(INITIAL_PAYLOAD.variantsPerType));
   const [draftReady, setDraftReady] = useState(false);
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const [submitBlockedFeedback, setSubmitBlockedFeedback] = useState(false);
@@ -420,12 +442,21 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
   const suiteSellingPointsInputRef = useRef<HTMLTextAreaElement | null>(null);
   const suiteMaterialInfoInputRef = useRef<HTMLTextAreaElement | null>(null);
   const suiteSizeInfoInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const variantsInputRef = useRef<HTMLInputElement | null>(null);
   const submitBlockedTimerRef = useRef<number | null>(null);
   const [viewportLayout, setViewportLayout] = useState({
     compact: false,
     cramped: false,
     availableHeight: 0,
   });
+  const parsedVariantsPerType = useMemo(() => parseVariantsPerTypeInput(variantsInput), [variantsInput]);
+  const variantsValidationMessage = useMemo(() => {
+    if (!variantsInput.trim()) {
+      return text.quantityRequired;
+    }
+
+    return parsedVariantsPerType === null ? text.quantityRangeError : "";
+  }, [parsedVariantsPerType, text.quantityRangeError, text.quantityRequired, variantsInput]);
 
   const hasDraftChanges = useMemo(() => {
     const payloadChanged = JSON.stringify(payload) !== JSON.stringify(INITIAL_PAYLOAD);
@@ -456,6 +487,10 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
       return "reference";
     }
 
+    if (parsedVariantsPerType === null) {
+      return "variants";
+    }
+
     if (payload.creationMode === "standard" && !payload.productName.trim()) {
       return "product-name";
     }
@@ -482,6 +517,7 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
     payload.productName,
     payload.sellingPoints,
     payload.sizeInfo,
+    parsedVariantsPerType,
     referenceFiles.length,
   ]);
   const submitBlockedMessage =
@@ -491,6 +527,8 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
         ? text.promptRequired
         : submitBlockReason === "reference"
           ? text.referenceFilesRequired
+          : submitBlockReason === "variants"
+            ? variantsValidationMessage
           : submitBlockReason === "suite-selling-points" ||
               submitBlockReason === "suite-material" ||
               submitBlockReason === "suite-size"
@@ -524,6 +562,7 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
 
       if (draft.payload) {
         setPayload((current) => ({ ...current, ...draft.payload }));
+        setVariantsInput(String(draft.payload.variantsPerType ?? INITIAL_PAYLOAD.variantsPerType));
       }
       if (draft.selectedTypes?.length) {
         setSelectedTypes(draft.selectedTypes);
@@ -565,6 +604,10 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
     },
     [],
   );
+
+  useEffect(() => {
+    setVariantsInput(String(payload.variantsPerType));
+  }, [payload.variantsPerType]);
 
   useEffect(() => {
     if (!draftReady) {
@@ -955,6 +998,7 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
       ...current,
       variantsPerType: recommendation.variantsPerType,
     }));
+    setVariantsInput(String(recommendation.variantsPerType));
     setRecommendationMessage(`${text.recommendationApplied} · ${recommendation.reason[language]}`);
   }
 
@@ -1038,6 +1082,7 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
     setPromptMarketOverridesEnabled(false);
     setOpenSections(INITIAL_OPEN_SECTIONS);
     setPayload(INITIAL_PAYLOAD);
+    setVariantsInput(String(INITIAL_PAYLOAD.variantsPerType));
     window.localStorage.removeItem(CREATE_JOB_DRAFT_KEY);
     window.setTimeout(() => {
       allowLeaveRef.current = false;
@@ -1054,6 +1099,16 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
     if (reason === "reference") {
       referenceFileInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       referenceFileInputRef.current?.focus();
+      return;
+    }
+
+    if (reason === "variants") {
+      setOpenSections((current) => ({ ...current, market: true }));
+      window.setTimeout(() => {
+        variantsInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        variantsInputRef.current?.focus();
+        variantsInputRef.current?.select();
+      }, 0);
       return;
     }
 
@@ -1097,6 +1152,8 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
           ? text.promptRequired
           : reason === "reference"
             ? text.referenceFilesRequired
+            : reason === "variants"
+              ? variantsValidationMessage
             : reason === "product-name"
               ? language === "zh"
                 ? "请先填写图片名。"
@@ -1123,6 +1180,11 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
       return;
     }
 
+    if (parsedVariantsPerType === null) {
+      triggerSubmitBlockedFeedback("variants");
+      return;
+    }
+
     let referenceLayoutOverride: unknown = null;
     let referencePosterCopyOverride: unknown = null;
 
@@ -1141,6 +1203,7 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
           "payload",
           JSON.stringify({
             ...payload,
+            variantsPerType: parsedVariantsPerType,
             selectedTypes: effectiveSelectedTypes,
             selectedRatios,
             selectedResolutions,
@@ -1262,60 +1325,55 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
       : payload.creationMode === "reference-remix"
         ? text.remakeSimplifiedHint
         : recommendationMessage || text.hint;
-  const baseSummary =
-    payload.creationMode === "prompt"
-      ? payload.customPrompt.trim() || text.baseSummaryEmpty
-      : payload.creationMode === "suite"
-        ? [payload.productName, labelFor(payload.category, language, PRODUCT_CATEGORIES), payload.materialInfo].filter(Boolean).join(" · ") || suiteModeHint
-      : payload.creationMode === "amazon-a-plus"
-        ? [payload.productName, payload.brandName, payload.sellingPoints].filter(Boolean).join(" · ") || amazonAPlusContextHint
-      : payload.creationMode === "reference-remix"
-        ? [text.remakeSimplifiedHint, `${text.referenceCopyMode}：${referenceCopyModeLabel}`].join(" ")
-        : [payload.productName, payload.brandName, labelFor(payload.category, language, PRODUCT_CATEGORIES)].filter(Boolean).join(" · ") || text.baseSummaryEmpty;
+  const joinSummaryParts = (parts: Array<string | null | undefined>) =>
+    parts
+      .map((part) => part?.trim())
+      .filter((part): part is string => Boolean(part))
+      .join(" · ");
   const marketSummary =
     payload.creationMode === "reference-remix"
-      ? [
+      ? joinSummaryParts([
           referenceCopyModeLabel,
-          selectedRatios[0] ?? "-",
-          selectedResolutions[0] ?? "-",
-          `${payload.variantsPerType}`,
-        ].join(" · ")
+          selectedRatios[0],
+          selectedResolutions[0],
+          parsedVariantsPerType === null ? text.quantityPending : `${parsedVariantsPerType}`,
+        ])
       : payload.creationMode === "prompt"
-        ? [
-            labelFor(payload.country, language, COUNTRIES),
-            labelFor(payload.platform, language, PLATFORMS),
-            labelFor(payload.language, language, OUTPUT_LANGUAGES),
+        ? joinSummaryParts([
+            payload.country ? labelFor(payload.country, language, COUNTRIES) : "",
+            payload.platform ? labelFor(payload.platform, language, PLATFORMS) : "",
+            payload.language ? labelFor(payload.language, language, OUTPUT_LANGUAGES) : "",
             text.promptMode,
-            selectedRatios[0] ?? "-",
-            selectedResolutions[0] ?? "-",
-          ].join(" · ")
+            selectedRatios[0],
+            selectedResolutions[0],
+          ])
       : payload.creationMode === "suite"
-        ? [
-            labelFor(payload.country, language, COUNTRIES),
-            labelFor(payload.language, language, OUTPUT_LANGUAGES),
-            labelFor(payload.platform, language, PLATFORMS),
+        ? joinSummaryParts([
+            payload.country ? labelFor(payload.country, language, COUNTRIES) : "",
+            payload.language ? labelFor(payload.language, language, OUTPUT_LANGUAGES) : "",
+            payload.platform ? labelFor(payload.platform, language, PLATFORMS) : "",
             suiteModeLabel,
-            `${effectiveSelectedTypes.length} ${text.typesUnit}`,
-            selectedRatios[0] ?? "-",
-            selectedResolutions[0] ?? "-",
-          ].join(" · ")
+            effectiveSelectedTypes.length ? `${effectiveSelectedTypes.length} ${text.typesUnit}` : "",
+            selectedRatios[0],
+            selectedResolutions[0],
+          ])
       : payload.creationMode === "amazon-a-plus"
-        ? [
-            labelFor(payload.country, language, COUNTRIES),
-            labelFor(payload.language, language, OUTPUT_LANGUAGES),
+        ? joinSummaryParts([
+            payload.country ? labelFor(payload.country, language, COUNTRIES) : "",
+            payload.language ? labelFor(payload.language, language, OUTPUT_LANGUAGES) : "",
             amazonAPlusModeLabel,
-            `${effectiveSelectedTypes.length} ${text.typesUnit}`,
-            selectedRatios[0] ?? "-",
-            selectedResolutions[0] ?? "-",
-          ].join(" · ")
-      : [
-          labelFor(payload.country, language, COUNTRIES),
-          labelFor(payload.platform, language, PLATFORMS),
+            effectiveSelectedTypes.length ? `${effectiveSelectedTypes.length} ${text.typesUnit}` : "",
+            selectedRatios[0],
+            selectedResolutions[0],
+          ])
+      : joinSummaryParts([
+          payload.country ? labelFor(payload.country, language, COUNTRIES) : "",
+          payload.platform ? labelFor(payload.platform, language, PLATFORMS) : "",
           text.standardMode,
-          `${selectedTypes.length} ${text.typesUnit}`,
-          selectedRatios[0] ?? "-",
-          selectedResolutions[0] ?? "-",
-        ].join(" · ");
+          selectedTypes.length ? `${selectedTypes.length} ${text.typesUnit}` : "",
+          selectedRatios[0],
+          selectedResolutions[0],
+        ]);
   const advancedSummary =
     payload.temporaryApiKey ||
     payload.temporaryApiBaseUrl ||
@@ -1330,18 +1388,24 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
       : text.advancedSummaryEmpty;
   const requestInputCount = payload.creationMode === "prompt" ? Math.max(files.length, 1) : files.length;
   const requestCount =
-    requestInputCount *
-    effectiveSelectedTypes.length *
-    selectedRatios.length *
-    selectedResolutions.length *
-    payload.variantsPerType;
-  const requestCountSummary = text.requestCountSummary.replace("{count}", String(requestCount));
-  const requestCountBreakdown = text.requestCountBreakdown
-    .replace("{sources}", String(requestInputCount))
-    .replace("{types}", String(effectiveSelectedTypes.length))
-    .replace("{ratios}", String(selectedRatios.length))
-    .replace("{resolutions}", String(selectedResolutions.length))
-    .replace("{variants}", String(payload.variantsPerType));
+    parsedVariantsPerType === null
+      ? null
+      : requestInputCount *
+        effectiveSelectedTypes.length *
+        selectedRatios.length *
+        selectedResolutions.length *
+        parsedVariantsPerType;
+  const requestCountSummary =
+    requestCount === null ? text.requestCountPendingSummary : text.requestCountSummary.replace("{count}", String(requestCount));
+  const requestCountBreakdown =
+    requestCount === null
+      ? text.requestCountPendingBreakdown
+      : text.requestCountBreakdown
+          .replace("{sources}", String(requestInputCount))
+          .replace("{types}", String(effectiveSelectedTypes.length))
+          .replace("{ratios}", String(selectedRatios.length))
+          .replace("{resolutions}", String(selectedResolutions.length))
+          .replace("{variants}", String(parsedVariantsPerType));
   const createWorkspaceClassName = [
     "create-workspace",
     viewportLayout.compact ? "is-compact-viewport" : "",
@@ -1603,7 +1667,6 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
           <div className="accordion-header">
             <div className="accordion-title-group">
               <h2>{text.baseInfo}</h2>
-              <p className="helper">{baseSummary}</p>
             </div>
             <div className="accordion-actions">
               <button className="ghost-button mini-button" onClick={clearBaseInfo} type="button">
@@ -1979,7 +2042,7 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
           <div className="accordion-header">
             <div className="accordion-title-group">
               <h2>{text.market}</h2>
-              <p className="helper">{marketSummary}</p>
+              {marketSummary ? <p className="helper">{marketSummary}</p> : null}
             </div>
             <button
               aria-expanded={openSections.market}
@@ -2167,7 +2230,34 @@ export function CreateJobForm({ language }: { language: UiLanguage }) {
                           : "Per-module count"
                         : text.variants}
                 </span>
-                <input min={1} max={6} type="number" value={payload.variantsPerType} onChange={(event) => setPayload({ ...payload, variantsPerType: Number(event.target.value) || 1 })} />
+                <input
+                  ref={variantsInputRef}
+                  min={1}
+                  max={10}
+                  step={1}
+                  inputMode="numeric"
+                  type="number"
+                  value={variantsInput}
+                  aria-invalid={Boolean(variantsValidationMessage)}
+                  onBlur={() => {
+                    if (parsedVariantsPerType !== null) {
+                      setVariantsInput(String(parsedVariantsPerType));
+                    }
+                  }}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setVariantsInput(nextValue);
+
+                    const nextParsedValue = parseVariantsPerTypeInput(nextValue);
+                    if (nextParsedValue !== null) {
+                      setPayload((current) => ({
+                        ...current,
+                        variantsPerType: nextParsedValue,
+                      }));
+                    }
+                  }}
+                />
+                {variantsValidationMessage ? <small className="helper error-text">{variantsValidationMessage}</small> : null}
               </label>
               {payload.creationMode === "prompt" ? (
                 <>
